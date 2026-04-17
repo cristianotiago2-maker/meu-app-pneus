@@ -1,126 +1,128 @@
 import streamlit as st
 import pandas as pd
+import plotly.express as px
+import requests
 from datetime import datetime
 from fpdf import FPDF
 
-# 1. Configuração da Página e Estilo
-st.set_page_config(page_title="VULCAT PNEUS - Gestão Pro", layout="wide", page_icon="🚛")
+# Configuração da página
+st.set_page_config(page_title="VULCAT PNEUS - Gestão Elite", layout="wide", page_icon="🚛")
 
-# Estilo Visual (Cores e Bordas)
-st.markdown("""
-    <style>
-    .stMetric { background-color: #ffffff; padding: 15px; border-radius: 10px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
-    .stDataFrame { border: 1px solid #e6e9ef; border-radius: 10px; }
-    </style>
-    """, unsafe_allow_html=True)
-
-# --- FUNÇÃO PARA GERAR PDF ---
-def exportar_pdf(titulo, df):
-    pdf = FPDF()
-    pdf.add_page()
-    pdf.set_font("Arial", 'B', 14)
-    pdf.cell(190, 10, f"VULCAT PNEUS - {titulo}", ln=True, align='C')
-    pdf.set_font("Arial", size=10)
-    pdf.ln(10)
-    # Cabeçalho
-    for col in df.columns:
-        pdf.cell(31, 8, str(col), border=1)
-    pdf.ln()
-    # Linhas
-    for i in range(len(df)):
-        for col in df.columns:
-            pdf.cell(31, 8, str(df.iloc[i][col])[:15], border=1)
-        pdf.ln()
-    return pdf.output(dest='S').encode('latin-1', 'replace')
+# --- FUNÇÃO CONSULTA CNPJ (API GRATUITA) ---
+def consultar_cnpj(cnpj):
+    cnpj = cnpj.replace(".", "").replace("/", "").replace("-", "")
+    try:
+        response = requests.get(f"https://receitaws.com.br{cnpj}")
+        if response.status_code == 200:
+            dados = response.json()
+            return dados.get('nome', ''), dados.get('logradouro', '') + ", " + dados.get('numero', ''), dados.get('telefone', '')
+    except:
+        return None
 
 # --- INICIALIZAÇÃO DOS DADOS ---
 if 'db' not in st.session_state:
     st.session_state.db = {
-        'clientes': pd.DataFrame(columns=['Nome', 'CNPJ/CPF', 'Telefone', 'Endereco']),
-        'medidas': pd.DataFrame({
-            "Medida": ["295/80 R22.5", "18.4-34", "11.00 R22", "14.9-24", "12.4-24", "23.1-26"],
-            "Tipo": ["Rodoviário", "Agrícola", "Rodoviário", "Agrícola", "Agrícola", "Agrícola"]
-        }),
-        'producao': pd.DataFrame(columns=['ID', 'Cliente', 'Serviço', 'Entrada', 'Saída', 'Status', 'Anotações']),
+        'clientes': pd.DataFrame(columns=['Nome', 'CNPJ', 'Telefone', 'Endereco']),
+        'medidas': pd.DataFrame({"Medida": ["295/80 R22.5", "18.4-34", "11.00 R22"], "Tipo": ["Rodoviário", "Agrícola", "Rodoviário"]}),
+        'producao': pd.DataFrame(columns=['ID', 'Cliente', 'Serviço', 'Entrada', 'Saída', 'Fogo', 'DOT', 'Status']),
         'financeiro': pd.DataFrame(columns=['Data', 'Descrição', 'Tipo', 'Valor']),
-        'estoque': pd.DataFrame({"Item": ["Manchão G", "Cola 1L", "Borracha"], "Qtd": [10, 5, 20]})
+        'estoque': pd.DataFrame({"Item": ["Manchão G", "Cola 1L"], "Qtd": [10, 5]})
     }
 
 # --- MENU LATERAL ---
 with st.sidebar:
     st.title("🚛 VULCAT PNEUS")
-    st.divider()
-    menu = st.radio("MENU", ["📊 Painel Geral", "👥 Clientes", "📏 Medidas", "📝 Orçamentos", "🏭 Produção", "📦 Estoque", "💰 Financeiro"])
+    menu = st.radio("MENU", ["📊 Painel Geral", "👥 Clientes", "📝 Orçamentos", "🏭 Produção", "📦 Estoque", "💰 Financeiro"])
     st.divider()
     emp_nome = st.text_input("Empresa", "Vulcat Pneus")
-    emp_tel = st.text_input("Telefone", "(00) 00000-0000")
 
-# --- 📊 PAINEL GERAL ---
+# --- 📊 PAINEL GERAL (COM GRÁFICOS) ---
 if menu == "📊 Painel Geral":
-    st.title(f"📊 Painel Geral - {emp_nome}")
+    st.title(f"📊 Painel Geral de Operações")
+    
+    # Métricas principais
     c1, c2, c3 = st.columns(3)
     c1.metric("Serviços Ativos", len(st.session_state.db['producao']))
     receita = st.session_state.db['financeiro'][st.session_state.db['financeiro']['Tipo'] == 'Entrada']['Valor'].sum()
-    c2.metric("Faturamento Mensal", f"R$ {receita:,.2f}")
-    c3.metric("Estoque Crítico", len(st.session_state.db['estoque'][st.session_state.db['estoque']['Qtd'] < 5]))
+    c2.metric("Receita Total", f"R$ {receita:,.2f}")
     
-    st.divider()
-    st.subheader("🏭 Fluxo da Oficina")
-    st.dataframe(st.session_state.db['producao'], use_container_width=True)
+    col_g1, col_g2 = st.columns(2)
+    with col_g1:
+        st.subheader("Etapas da Produção")
+        if not st.session_state.db['producao'].empty:
+            fig_prod = px.pie(st.session_state.db['producao'], names='Status', hole=0.4, color_discrete_sequence=px.colors.qualitative.Pastel)
+            st.plotly_chart(fig_prod, use_container_width=True)
+        else: st.info("Sem dados de produção.")
+        
+    with col_g2:
+        st.subheader("Entradas vs Saídas")
+        if not st.session_state.db['financeiro'].empty:
+            fig_fin = px.pie(st.session_state.db['financeiro'], names='Tipo', hole=0.4, color_discrete_map={'Entrada':'#2ecc71', 'Saída':'#e74c3c'})
+            st.plotly_chart(fig_fin, use_container_width=True)
+        else: st.info("Sem dados financeiros.")
 
-# --- 👥 CLIENTES ---
+# --- 👥 CLIENTES (COM BUSCA DE CNPJ) ---
 elif menu == "👥 Clientes":
-    st.header("👥 Cadastro de Clientes")
-    st.session_state.db['clientes'] = st.data_editor(st.session_state.db['clientes'], num_rows="dynamic", use_container_width=True)
+    st.header("👥 Cadastro de Clientes Inteligente")
+    with st.expander("🔍 Buscar por CNPJ"):
+        cnpj_busca = st.text_input("Digite o CNPJ para preencher")
+        if st.button("Buscar Dados"):
+            resultado = consultar_cnpj(cnpj_busca)
+            if resultado:
+                st.session_state['temp_nome'], st.session_state['temp_end'], st.session_state['temp_tel'] = resultado
+                st.success("Dados encontrados!")
+            else: st.error("CNPJ não encontrado.")
 
-# --- 📏 MEDIDAS ---
-elif menu == "📏 Medidas":
-    st.header("📏 Catálogo de Medidas")
-    st.session_state.db['medidas'] = st.data_editor(st.session_state.db['medidas'], num_rows="dynamic", use_container_width=True)
+    with st.form("cad_cli", clear_on_submit=True):
+        nome_f = st.text_input("Nome/Razão Social", value=st.session_state.get('temp_nome', ''))
+        cnpj_f = st.text_input("CNPJ/CPF", value=cnpj_busca)
+        tel_f = st.text_input("Telefone", value=st.session_state.get('temp_tel', ''))
+        end_f = st.text_input("Endereço", value=st.session_state.get('temp_end', ''))
+        if st.form_submit_button("✅ Cadastrar Cliente"):
+            nova_l = pd.DataFrame([[nome_f, cnpj_f, tel_f, end_f]], columns=st.session_state.db['clientes'].columns)
+            st.session_state.db['clientes'] = pd.concat([st.session_state.db['clientes'], nova_l], ignore_index=True)
+    
+    st.session_state.db['clientes'] = st.data_editor(st.session_state.db['clientes'], num_rows="dynamic", use_container_width=True)
 
 # --- 📝 ORÇAMENTOS ---
 elif menu == "📝 Orçamentos":
-    st.header("📝 Novo Orçamento")
-    if st.session_state.db['clientes'].empty:
-        st.warning("⚠️ Cadastre um cliente primeiro na aba Clientes.")
-    else:
-        with st.form("orc"):
-            c_sel = st.selectbox("Cliente", st.session_state.db['clientes']['Nome'].tolist())
-            m_sel = st.selectbox("Medida", st.session_state.db['medidas']['Medida'].tolist())
-            serv = st.text_input("Serviço")
-            val = st.number_input("Valor R$", min_value=0.0)
-            if st.form_submit_button("🚀 Aprovar e Iniciar"):
-                id_serv = len(st.session_state.db['producao']) + 1
-                hora = datetime.now().strftime("%H:%M")
-                # Produção
-                np = pd.DataFrame([[id_serv, c_sel, f"{m_sel} - {serv}", hora, "--:--", "Fila", ""]], columns=st.session_state.db['producao'].columns)
-                st.session_state.db['producao'] = pd.concat([st.session_state.db['producao'], np], ignore_index=True)
-                # Financeiro
-                nf = pd.DataFrame([[datetime.now().strftime("%d/%m"), f"OS {id_serv}: {c_sel}", "Entrada", val]], columns=st.session_state.db['financeiro'].columns)
-                st.session_state.db['financeiro'] = pd.concat([st.session_state.db['financeiro'], nf], ignore_index=True)
-                st.success("✅ OS Criada! Verifique Produção e Financeiro.")
+    st.header("📝 Orçamentos")
+    with st.form("orc"):
+        cli = st.selectbox("Cliente", st.session_state.db['clientes']['Nome'].tolist()) if not st.session_state.db['clientes'].empty else st.warning("Cadastre um cliente.")
+        med = st.selectbox("Medida", st.session_state.db['medidas']['Medida'].tolist())
+        serv = st.text_input("Serviço")
+        val = st.number_input("Valor R$", min_value=0.0)
+        if st.form_submit_button("Aprovar Orçamento"):
+            id_os = len(st.session_state.db['producao']) + 1
+            # Produção com Fogo e DOT
+            np = pd.DataFrame([[id_os, cli, f"{med}-{serv}", datetime.now().strftime("%H:%M"), "--:--", "", "", "Fila"]], columns=st.session_state.db['producao'].columns)
+            st.session_state.db['producao'] = pd.concat([st.session_state.db['producao'], np], ignore_index=True)
+            # Financeiro
+            nf = pd.DataFrame([[datetime.now().strftime("%d/%m"), f"OS {id_os}", "Entrada", val]], columns=st.session_state.db['financeiro'].columns)
+            st.session_state.db['financeiro'] = pd.concat([st.session_state.db['financeiro'], nf], ignore_index=True)
+            st.success("✅ Aprovado!")
 
-# --- 🏭 PRODUÇÃO ---
+# --- 🏭 PRODUÇÃO (COM FOGO E DOT) ---
 elif menu == "🏭 Produção":
-    st.header("🏭 Ficha de Produção")
+    st.header("🏭 Ficha de Produção Oficina")
     st.session_state.db['producao'] = st.data_editor(st.session_state.db['producao'], num_rows="dynamic", use_container_width=True)
-    if not st.session_state.db['producao'].empty:
-        pdf = exportar_pdf("PRODUÇÃO", st.session_state.db['producao'])
-        st.download_button("📥 Baixar PDF Produção", pdf, "producao.pdf", "application/pdf")
-
-# --- 📦 ESTOQUE ---
-elif menu == "📦 Estoque":
-    st.header("📦 Estoque")
-    st.session_state.db['estoque'] = st.data_editor(st.session_state.db['estoque'], num_rows="dynamic", use_container_width=True)
-    pdf = exportar_pdf("ESTOQUE", st.session_state.db['estoque'])
-    st.download_button("📥 Baixar PDF Estoque", pdf, "estoque.pdf", "application/pdf")
 
 # --- 💰 FINANCEIRO ---
 elif menu == "💰 Financeiro":
-    st.header("💰 Financeiro")
+    st.header("💰 Controle Financeiro")
     st.session_state.db['financeiro'] = st.data_editor(st.session_state.db['financeiro'], num_rows="dynamic", use_container_width=True)
-    pdf = exportar_pdf("FINANCEIRO", st.session_state.db['financeiro'])
-    st.download_button("📥 Baixar PDF Financeiro", pdf, "financeiro.pdf", "application/pdf")
+    ent = st.session_state.db['financeiro'][st.session_state.db['financeiro']['Tipo'] == 'Entrada']['Valor'].sum()
+    sai = st.session_state.db['financeiro'][st.session_state.db['financeiro']['Tipo'] == 'Saída']['Valor'].sum()
+    st.divider()
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Total Entradas", f"R$ {ent:,.2f}")
+    c2.metric("Total Saídas", f"R$ {sai:,.2f}")
+    c3.metric("Saldo em Caixa", f"R$ {ent - sai:,.2f}")
+
+elif menu == "📦 Estoque":
+    st.header("📦 Estoque")
+    st.session_state.db['estoque'] = st.data_editor(st.session_state.db['estoque'], num_rows="dynamic", use_container_width=True)
+
 
 
 
