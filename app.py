@@ -1,50 +1,3 @@
-from fpdf import FPDF
-import datetime
-
-elif menu == "Ficha Produção":
-    st.title("📋 FICHA DE PRODUÇÃO")
-
-    cliente = st.text_input("Cliente")
-    veiculo = st.text_input("Veículo")
-    servico = st.text_area("Serviço realizado")
-
-    if st.button("Gerar PDF"):
-        pdf = FPDF()
-        pdf.add_page()
-
-        pdf.set_font("Arial", size=12)
-
-        pdf.cell(200, 10, txt="FICHA DE PRODUÇÃO", ln=True, align="C")
-        pdf.ln(10)
-
-        pdf.cell(200, 10, txt=f"Cliente: {cliente}", ln=True)
-        pdf.cell(200, 10, txt=f"Veículo: {veiculo}", ln=True)
-        pdf.multi_cell(200, 10, txt=f"Serviço: {servico}")
-
-        data = datetime.datetime.now().strftime("%d/%m/%Y %H:%M")
-        pdf.ln(10)
-        pdf.cell(200, 10, txt=f"Data: {data}", ln=True)
-
-        file_name = "ficha_producao.pdf"
-        pdf.output(file_name)
-
-        with open(file_name, "rb") as f:
-            st.download_button(
-                label="📥 Baixar PDF",
-                data=f,
-                file_name=file_name,
-                mime="application/pdf"
-            )
-
-        st.success("PDF gerado com sucesso!")
-
----------- Forwarded message ---------
-De: Tiago Cristiano da Silva <cristianotiago2@gmail.com>
-Date: sáb., 18 de abr. de 2026, 00:22
-Subject: Fwd:
-To: Tiago Cristiano da Silva <cristianotiago2@gmail.com>
-
-
 import streamlit as st
 import pandas as pd
 import sqlite3
@@ -406,4 +359,5 @@ if st.session_state.logado:
     app()
 else:
     login()
+
 
