@@ -1,154 +1,155 @@
 import streamlit as st
-import pandas as pd
+import sqlite3
+import hashlib
 from datetime import datetime
-import os
+import pandas as pd
+from io import BytesIO
+from reportlab.pdfgen import canvas
 
-# -------- CONFIG --------
-st.set_page_config(page_title="VULCAT PNEUS", layout="wide")
+# =========================
+# BANCO
+# =========================
+conn = sqlite3.connect("vulcat_saas.db", check_same_thread=False)
+c = conn.cursor()
 
-# -------- ESTILO --------
-st.markdown("""
-<style>
-.main {background-color: #0E1117;}
-h1, h2, h3 {color: white;}
-[data-testid="metric-container"] {
-    background-color: #1c1f26;
-    padding: 15px;
-    border-radius: 10px;
-}
-</style>
-""", unsafe_allow_html=True)
+c.execute("""CREATE TABLE IF NOT EXISTS empresas (
+id INTEGER PRIMARY KEY,
+nome TEXT,
+plano TEXT
+)""")
 
-# -------- LOGIN --------
+c.execute("""CREATE TABLE IF NOT EXISTS usuarios (
+id INTEGER PRIMARY KEY,
+empresa_id INTEGER,
+user TEXT,
+password TEXT,
+role TEXT
+)""")
+
+c.execute("""CREATE TABLE IF NOT EXISTS ordens (
+id INTEGER PRIMARY KEY,
+empresa_id INTEGER,
+cliente TEXT,
+servico TEXT,
+valor REAL,
+data TEXT
+)""")
+
+conn.commit()
+
+# =========================
+# UTIL
+# =========================
+def hash_pw(pw):
+    return hashlib.sha256(pw.encode()).hexdigest()
+
+# empresa demo (SaaS base)
+def criar_empresa_demo():
+    c.execute("SELECT * FROM empresas")
+    if not c.fetchall():
+        c.execute("INSERT INTO empresas VALUES (NULL,?,?)",
+                  ("VULCAT DEMO", "PRO"))
+        empresa_id = c.lastrowid
+
+        c.execute("INSERT INTO usuarios VALUES (NULL,?,?,?,?)",
+                  (empresa_id, "admin", hash_pw("1234"), "admin"))
+        conn.commit()
+
+criar_empresa_demo()
+
+# =========================
+# LOGIN SAAS
+# =========================
 if "logado" not in st.session_state:
     st.session_state.logado = False
+    st.session_state.empresa_id = None
 
 if not st.session_state.logado:
-    st.title("🔐 Login - VULCAT PNEUS")
+    st.title("🚀 VULCAT SAAS LOGIN")
+
     user = st.text_input("Usuário")
-    senha = st.text_input("Senha", type="password")
+    pw = st.text_input("Senha", type="password")
 
     if st.button("Entrar"):
-        if user == "admin" and senha == "1234":
+        c.execute("""
+        SELECT empresa_id, role FROM usuarios 
+        WHERE user=? AND password=?
+        """, (user, hash_pw(pw)))
+
+        result = c.fetchone()
+
+        if result:
             st.session_state.logado = True
-            st.rerun()
+            st.session_state.empresa_id = result[0]
+            st.success("Login OK")
         else:
-            st.error("Login inválido")
+            st.error("Erro login")
 
     st.stop()
 
-# -------- FUNÇÕES --------
-def carregar(nome, colunas):
-    if os.path.exists(nome):
-        return pd.read_csv(nome)
-    return pd.DataFrame(columns=colunas)
+empresa_id = st.session_state.empresa_id
 
-def salvar(df, nome):
-    df.to_csv(nome, index=False)
+# =========================
+# MENU
+# =========================
+st.sidebar.title("⚙ SAAS MENU")
 
-# -------- BANCO --------
-clientes = carregar("clientes.csv", ["Nome", "Telefone"])
-estoque = carregar("estoque.csv", ["Item", "Quantidade"])
-financeiro = carregar("financeiro.csv", ["Data", "Tipo", "Valor"])
+menu = st.sidebar.radio("Navegação", [
+    "Dashboard",
+    "Clientes",
+    "Orçamentos"
+])
 
-# -------- SIDEBAR --------
-with st.sidebar:
-    st.title("🛞 VULCAT")
-    menu = st.radio("Menu", ["Dashboard", "Orçamento", "Estoque", "Financeiro", "Clientes"])
-    if st.button("Sair"):
-        st.session_state.logado = False
-        st.rerun()
-
-# -------- DASHBOARD --------
+# =========================
+# DASHBOARD SAAS
+# =========================
 if menu == "Dashboard":
-    st.title("📊 Painel Geral")
+    st.title("📊 DASHBOARD SAAS")
 
-    entradas = financeiro[financeiro["Tipo"] == "Entrada"]["Valor"].sum()
-    saidas = financeiro[financeiro["Tipo"] == "Saída"]["Valor"].sum()
-    saldo = entradas - saidas
+    ordens = pd.read_sql(f"""
+    SELECT * FROM ordens WHERE empresa_id={empresa_id}
+    """, conn)
 
-    c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Entradas", f"R$ {entradas:,.2f}")
-    c2.metric("Saídas", f"R$ {saidas:,.2f}")
-    c3.metric("Saldo", f"R$ {saldo:,.2f}")
-    c4.metric("Clientes", len(clientes))
+    col1, col2 = st.columns(2)
 
-    st.divider()
+    col1.metric("Ordens", len(ordens))
+    col2.metric("Faturamento", f"R$ {ordens['valor'].sum() if not ordens.empty else 0}")
 
-    if not estoque.empty:
-        st.subheader("📦 Estoque")
-        st.dataframe(estoque)
-
-    baixo = estoque[estoque["Quantidade"] < 5]
-    if not baixo.empty:
-        st.warning("⚠️ Estoque baixo")
-        st.dataframe(baixo)
-
-# -------- ORÇAMENTO --------
-elif menu == "Orçamento":
-    st.title("📄 Orçamento")
-
-    cliente = st.selectbox("Cliente", [""] + clientes["Nome"].tolist())
-
-    item = st.text_input("Serviço/Produto")
-    qtd = st.number_input("Qtd", min_value=1, value=1)
-    valor = st.number_input("Valor", min_value=0.0)
-
-    total = qtd * valor
-    st.metric("Total", f"R$ {total:,.2f}")
-
-    if st.button("Salvar como entrada"):
-        if cliente == "":
-            st.warning("Selecione um cliente")
-        else:
-            novo = pd.DataFrame([[datetime.now(), "Entrada", total]],
-                                columns=["Data", "Tipo", "Valor"])
-            financeiro = pd.concat([financeiro, novo], ignore_index=True)
-            salvar(financeiro, "financeiro.csv")
-            st.success("Salvo no financeiro!")
-
-# -------- ESTOQUE --------
-elif menu == "Estoque":
-    st.title("📦 Estoque")
-
-    item = st.text_input("Item")
-    qtd = st.number_input("Quantidade", min_value=0)
-
-    if st.button("Adicionar"):
-        novo = pd.DataFrame([[item, qtd]], columns=["Item", "Quantidade"])
-        estoque = pd.concat([estoque, novo], ignore_index=True)
-        salvar(estoque, "estoque.csv")
-        st.success("Adicionado!")
-
-    st.dataframe(estoque)
-
-# -------- FINANCEIRO --------
-elif menu == "Financeiro":
-    st.title("💰 Financeiro")
-
-    tipo = st.selectbox("Tipo", ["Entrada", "Saída"])
-    valor = st.number_input("Valor", min_value=0.0)
-
-    if st.button("Salvar"):
-        novo = pd.DataFrame([[datetime.now(), tipo, valor]],
-                            columns=["Data", "Tipo", "Valor"])
-        financeiro = pd.concat([financeiro, novo], ignore_index=True)
-        salvar(financeiro, "financeiro.csv")
-        st.success("Salvo!")
-
-    st.dataframe(financeiro)
-
-# -------- CLIENTES --------
+# =========================
+# CLIENTES (SIMPLES SAAS)
+# =========================
 elif menu == "Clientes":
-    st.title("👥 Clientes")
+    st.title("👤 CLIENTES")
 
     nome = st.text_input("Nome")
     tel = st.text_input("Telefone")
 
-    if st.button("Adicionar"):
-        novo = pd.DataFrame([[nome, tel]], columns=["Nome", "Telefone"])
-        clientes = pd.concat([clientes, novo], ignore_index=True)
-        salvar(clientes, "clientes.csv")
-        st.success("Cliente salvo!")
+    if st.button("Salvar"):
+        st.success("Aqui você pode expandir com tabela clientes por empresa")
 
-    st.dataframe(clientes)
+# =========================
+# ORÇAMENTOS SAAS
+# =========================
+elif menu == "Orçamentos":
+    st.title("🧾 ORÇAMENTOS SAAS")
+
+    cliente = st.text_input("Cliente")
+    servico = st.selectbox("Serviço", ["Vulcanização", "Conserto", "Troca"])
+    valor = st.number_input("Valor", 0.0)
+
+    if st.button("Criar"):
+        data = str(datetime.now().date())
+
+        c.execute("""
+        INSERT INTO ordens VALUES (NULL,?,?,?,?,?)
+        """, (empresa_id, cliente, servico, valor, data))
+
+        conn.commit()
+
+        st.success("Orçamento criado!")
+
+    ordens = pd.read_sql(f"""
+    SELECT * FROM ordens WHERE empresa_id={empresa_id}
+    """, conn)
+
+    st.dataframe(ordens)
