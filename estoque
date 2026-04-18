@@ -1,0 +1,16 @@
+# No módulo de Estoque, use colunas para criar os cards
+st.subheader("📦 Resumo de Estoque de Pneus")
+col1, col2, col3 = st.columns(3)
+
+with col1:
+    st.info("🚜 **Agrícolas**")
+    st.metric("Total em estoque", "120 unid.")
+
+with col2:
+    st.warning("🚚 **Rodoviários**")
+    st.metric("Total em estoque", "85 unid.")
+
+with col3:
+    st.error("⚠️ **Crítico**")
+    st.metric("Reposição necessária", "5 itens")
+
