@@ -1,54 +1,67 @@
 import streamlit as st
 import pandas as pd
 
-# CONFIGURAÇÃO DA PÁGINA
-st.set_page_config(page_title="Agro-Frota v2", layout="wide")
-
-# --- 1. LOGOTIPO E CONFIGURAÇÃO DA EMPRESA ---
+# 1. CONFIGURAÇÃO DA BARRA LATERAL (LOGO E NOME)
 with st.sidebar:
-    # Tenta carregar o logo se o arquivo existir no GitHub
     try:
+        # Tenta carregar a imagem 'logo.png' que você vai subir no GitHub
         st.image("logo.png", width=200)
     except:
-        st.warning("⚠️ Adicione o arquivo 'logo.png' no GitHub.")
+        st.info("💡 Para ver seu logo aqui, suba um arquivo chamado 'logo.png' no GitHub.")
     
-    st.title("Configurações")
-    nome_empresa = st.text_input("Nome da Empresa", "Agro-Frota")
     st.divider()
+    st.title("⚙️ Configurações")
+    nome_empresa = st.text_input("Nome da Empresa", "Agro-Frota")
 
-st.title(f"📊 Painel: {nome_empresa}")
+# 2. TÍTULO PRINCIPAL
+st.title(f"🚜 Gestão: {nome_empresa}")
 
-# --- 2. ORÇAMENTO COM ESPAÇO EDITÁVEL ---
-st.subheader("📝 Planejamento de Orçamento")
+# 3. ÁREA DE ORÇAMENTO EDITÁVEL
+st.divider()
+st.subheader("📝 Orçamento e Metas")
+st.write("Clique nas células abaixo para editar os valores:")
 
-# Criamos uma tabela base
-dados_base = {
-    "Descrição do Item": ["Combustível", "Manutenção", "Pneus", "Seguro"],
-    "Valor Planejado (R$)": [0.0, 0.0, 0.0, 0.0]
+# Criando a tabela inicial
+dados = {
+    "Categoria": ["Diesel", "Manutenção Preventiva", "Pneus", "Seguros", "Outros"],
+    "Valor Planejado (R$)": [0.0, 0.0, 0.0, 0.0, 0.0]
 }
-df_orcamento = pd.DataFrame(dados_base)
+df_base = pd.DataFrame(dados)
 
-# Tabela Editável (Aqui você pode escrever e mudar os valores)
+# O data_editor permite que você mude os valores direto no app
 tabela_editavel = st.data_editor(
-    df_orcamento, 
-    num_rows="dynamic", # Permite adicionar ou excluir linhas
+    df_base, 
+    num_rows="dynamic", # Permite adicionar e excluir linhas (botão +)
     use_container_width=True
 )
 
+# Calcula o total automaticamente conforme você edita
 total = tabela_editavel["Valor Planejado (R$)"].sum()
-st.metric("Total Geral do Orçamento", f"R$ {total:,.2f}")
+st.metric("Total do Orçamento", f"R$ {total:,.2f}")
 
-# --- 3. ANEXAR NOTAS FISCAIS ---
+# 4. ANEXAR NOTAS FISCAIS (SUPORTE A FOTOS)
 st.divider()
-st.subheader("📸 Anexar Notas e Recibos")
-fotos = st.file_uploader("Tire foto ou escolha o arquivo", type=['png', 'jpg', 'jpeg', 'pdf'], accept_multiple_files=True)
+st.subheader("📸 Notas Fiscais e Recibos")
+st.write("Tire uma foto ou anexe documentos abaixo:")
 
-if fotos:
-    cols = st.columns(3)
-    for i, foto in enumerate(fotos):
-        with cols[i % 3]:
-            st.image(foto, caption=foto.name, use_container_width=True)
+arquivos = st.file_uploader(
+    "Selecionar arquivos", 
+    type=['png', 'jpg', 'jpeg', 'pdf'], 
+    accept_multiple_files=True
+)
+
+if arquivos:
+    # Mostra as fotos em colunas
+    colunas = st.columns(3)
+    for index, arquivo in enumerate(arquivos):
+        with colunas[index % 3]:
+            if arquivo.type != "application/pdf":
+                st.image(arquivo, caption=arquivo.name, use_container_width=True)
+            else:
+                st.write(f"📄 {arquivo.name}")
 
 st.divider()
-st.info("💡 Lembrete: Por enquanto, as alterações somem ao fechar o app. No próximo passo, vamos configurar para salvar de verdade.")
+st.warning("⚠️ Lembre-se: Por enquanto, ao atualizar a página (F5), os dados voltam ao padrão. O próximo passo será configurar o Google Sheets para salvar fixo.")
+
+
 
