@@ -2,7 +2,6 @@ streamlit
 pandas
 fpdf2
 plotly
-streamlit-option-menu
 openpyx1
 
 
