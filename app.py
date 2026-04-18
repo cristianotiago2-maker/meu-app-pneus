@@ -1,195 +1,170 @@
-// 🏆 SISTEMA ABSURDO (NÍVEL EMPRESA GRANDE)
-// Inclui: login, dashboard avançado, filtros, estoque com alerta, PDF com logo, base pronta pra app
+import streamlit as st
+import json, os
+import pandas as pd
+from reportlab.platypus import SimpleDocTemplate, Paragraph
+from reportlab.lib.styles import getSampleStyleSheet
 
-const express = require('express');
-const app = express();
-const cors = require('cors');
-const bodyParser = require('body-parser');
-const fs = require('fs');
-const PDFDocument = require('pdfkit');
+DB = "db.json"
 
-app.use(cors());
-app.use(bodyParser.json());
+# ===== BANCO =====
+if not os.path.exists(DB):
+    with open(DB, "w") as f:
+        json.dump({
+            "usuarios":[{"login":"admin","senha":"123"}],
+            "clientes":[],
+            "producoes":[],
+            "estoque":[],
+            "financeiro":[]
+        }, f)
 
-// ===== BANCO =====
-const DB = 'db.json';
-if (!fs.existsSync(DB)) {
-  fs.writeFileSync(DB, JSON.stringify({
-    usuarios:[{login:'admin',senha:'123'}],
-    empresa:{nome:'Vulcat Pneus', telefone:'', cnpj:''},
-    clientes:[], producoes:[], orcamentos:[], estoque:[], financeiro:[]
-  },null,2));
-}
+def read_db():
+    return json.load(open(DB))
 
-const readDB = ()=> JSON.parse(fs.readFileSync(DB));
-const saveDB = (d)=> fs.writeFileSync(DB, JSON.stringify(d,null,2));
+def save_db(data):
+    json.dump(data, open(DB,"w"), indent=2)
 
-// ===== LOGIN =====
-app.post('/login',(req,res)=>{
-  const db = readDB();
-  const u = db.usuarios.find(x=>x.login==req.body.login && x.senha==req.body.senha);
-  if(u) return res.json({ok:true});
-  res.status(401).json({ok:false});
-});
+# ===== LOGIN =====
+if "logado" not in st.session_state:
+    st.session_state.logado = False
 
-// ===== CLIENTES =====
-app.post('/clientes',(req,res)=>{
-  const db = readDB();
-  const c = {id:Date.now(),...req.body};
-  db.clientes.push(c);
-  saveDB(db);
-  res.json(c);
-});
-app.get('/clientes',(req,res)=>res.json(readDB().clientes));
+if not st.session_state.logado:
+    st.title("🔐 Login Vulcat")
+    user = st.text_input("Usuário")
+    senha = st.text_input("Senha", type="password")
 
-// ===== ESTOQUE COM ALERTA =====
-app.post('/estoque',(req,res)=>{
-  const db = readDB();
-  const item = {id:Date.now(),min:5,...req.body};
-  db.estoque.push(item);
-  saveDB(db);
-  res.json(item);
-});
+    if st.button("Entrar"):
+        db = read_db()
+        ok = any(u["login"]==user and u["senha"]==senha for u in db["usuarios"])
+        if ok:
+            st.session_state.logado = True
+            st.rerun()
+        else:
+            st.error("Login inválido")
 
-app.get('/estoque',(req,res)=>{
-  const itens = readDB().estoque;
-  const alerta = itens.filter(i=>i.qtd <= i.min);
-  res.json({itens, alerta});
-});
+    st.stop()
 
-// ===== PRODUÇÃO =====
-app.post('/producao',(req,res)=>{
-  const db = readDB();
-  const p = {id:Date.now(),status:'Em análise',data:new Date(),...req.body};
-  db.producoes.push(p);
-  saveDB(db);
-  res.json(p);
-});
+# ===== MENU =====
+st.set_page_config(layout="wide")
+st.title("🏆 Vulcat Sistema Profissional")
 
-app.get('/producao',(req,res)=>res.json(readDB().producoes));
+menu = st.sidebar.selectbox("Menu", [
+    "Dashboard","Clientes","Produção","Estoque","Financeiro"
+])
 
-// ===== ORÇAMENTO =====
-app.post('/orcamentos',(req,res)=>{
-  const db = readDB();
-  const o = {id:Date.now(),status:'Aberto',data:new Date(),...req.body};
-  db.orcamentos.push(o);
-  db.financeiro.push({tipo:'entrada',valor:o.valor,data:new Date()});
-  saveDB(db);
-  res.json(o);
-});
+db = read_db()
 
-app.get('/orcamentos',(req,res)=>res.json(readDB().orcamentos));
+# ===== DASHBOARD =====
+if menu == "Dashboard":
+    st.subheader("📊 Visão Geral")
 
-// ===== FINANCEIRO =====
-app.get('/financeiro',(req,res)=>{
-  const db = readDB();
-  const total = db.financeiro.reduce((s,f)=>s+f.valor,0);
-  res.json({lista:db.financeiro,total});
-});
+    total = sum(f["valor"] for f in db["financeiro"]) if db["financeiro"] else 0
 
-// ===== DASHBOARD AVANÇADO =====
-app.get('/dashboard',(req,res)=>{
-  const db = readDB();
-  const total = db.financeiro.reduce((s,f)=>s+f.valor,0);
+    c1,c2,c3,c4 = st.columns(4)
+    c1.metric("Clientes", len(db["clientes"]))
+    c2.metric("Produções", len(db["producoes"]))
+    c3.metric("Itens Estoque", len(db["estoque"]))
+    c4.metric("Faturamento", f"R$ {total}")
 
-  res.json({
-    clientes:db.clientes.length,
-    producao:db.producoes.length,
-    estoque:db.estoque.length,
-    faturamento:total
-  });
-});
+# ===== CLIENTES =====
+elif menu == "Clientes":
+    st.subheader("👥 Cadastro")
 
-// ===== PDF COM IDENTIDADE =====
-app.get('/producao/:id/pdf',(req,res)=>{
-  const db = readDB();
-  const p = db.producoes.find(x=>x.id==req.params.id);
-  const emp = db.empresa;
+    nome = st.text_input("Nome")
+    tel = st.text_input("Telefone")
 
-  const doc = new PDFDocument();
-  res.setHeader('Content-Type','application/pdf');
-  res.setHeader('Content-Disposition','attachment; filename=ficha.pdf');
+    if st.button("Salvar Cliente"):
+        db["clientes"].append({
+            "id": len(db["clientes"])+1,
+            "nome": nome,
+            "tel": tel
+        })
+        save_db(db)
+        st.success("Salvo!")
 
-  doc.pipe(res);
+    st.dataframe(pd.DataFrame(db["clientes"]))
 
-  doc.fontSize(20).text(emp.nome);
-  doc.text(`CNPJ: ${emp.cnpj}`);
-  doc.text(`Tel: ${emp.telefone}`);
-  doc.moveDown();
+# ===== PRODUÇÃO =====
+elif menu == "Produção":
+    st.subheader("🔧 Nova Produção")
 
-  doc.fontSize(16).text('FICHA DE PRODUÇÃO');
-  doc.moveDown();
+    cliente = st.text_input("Cliente")
+    servico = st.text_input("Serviço")
+    pneu = st.text_input("Pneu")
+    valor = st.number_input("Valor", 0.0)
 
-  doc.text(`Cliente: ${p.cliente}`);
-  doc.text(`Serviço: ${p.servico}`);
-  doc.text(`Pneu: ${p.pneu}`);
-  doc.text(`Status: ${p.status}`);
+    if st.button("Salvar Produção"):
+        p = {
+            "id": len(db["producoes"])+1,
+            "cliente": cliente,
+            "servico": servico,
+            "pneu": pneu,
+            "valor": valor
+        }
+        db["producoes"].append(p)
 
-  doc.moveDown();
-  doc.text('*** SEM VALORES ***');
+        db["financeiro"].append({"valor": valor})
 
-  doc.end();
-});
+        save_db(db)
+        st.success("Produção salva!")
 
-// ===== FRONT NIVEL SISTEMA =====
-app.get('/',(req,res)=>{
-  res.send(`
-  <html>
-  <head>
-    <title>Sistema ABSURDO</title>
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <style>
-      body{font-family:Arial;background:#020617;color:#fff}
-      header{background:#0f172a;padding:15px}
-      .container{padding:20px}
-      .card{background:#0f172a;padding:15px;border-radius:12px;margin:10px 0}
-      input,button{padding:10px;margin:5px;border-radius:8px;border:none}
-      button{background:#22c55e;font-weight:bold}
-    </style>
-  </head>
-  <body>
+    st.divider()
 
-  <header><h1>🏆 Vulcat Sistema Profissional</h1></header>
+    st.subheader("📋 Lista")
 
-  <div class="container">
+    for p in db["producoes"]:
+        col1, col2 = st.columns([4,1])
 
-  <div class="card">
-    <h2>Dashboard</h2>
-    <canvas id="graf"></canvas>
-    <button onclick="dash()">Atualizar</button>
-  </div>
+        col1.write(f"{p['cliente']} | {p['servico']} | {p['pneu']}")
 
-  <div class="card">
-    <h2>Alerta Estoque</h2>
-    <div id="alerta"></div>
-    <button onclick="estoque()">Ver</button>
-  </div>
+        if col2.button("PDF", key=p["id"]):
+            file = f"ficha_{p['id']}.pdf"
 
-  <script>
-  let chart;
+            doc = SimpleDocTemplate(file)
+            styles = getSampleStyleSheet()
 
-  async function dash(){
-    const r = await fetch('/dashboard');
-    const d = await r.json();
+            content = [
+                Paragraph("VULCAT PNEUS", styles["Title"]),
+                Paragraph(f"Cliente: {p['cliente']}", styles["Normal"]),
+                Paragraph(f"Serviço: {p['servico']}", styles["Normal"]),
+                Paragraph(f"Pneu: {p['pneu']}", styles["Normal"]),
+                Paragraph("SEM VALORES", styles["Normal"])
+            ]
 
-    if(chart) chart.destroy();
+            doc.build(content)
 
-    chart = new Chart(document.getElementById('graf'),{
-      type:'bar',
-      data:{labels:['Clientes','Produção','Estoque','Faturamento'],datasets:[{data:[d.clientes,d.producao,d.estoque,d.faturamento]}]}
-    });
-  }
+            with open(file, "rb") as f:
+                st.download_button("Baixar PDF", f, file_name=file)
 
-  async function estoque(){
-    const r = await fetch('/estoque');
-    const d = await r.json();
-    alerta.innerHTML = d.alerta.map(a=>`⚠️ ${a.nome} baixo`).join('<br>');
-  }
-  </script>
+# ===== ESTOQUE =====
+elif menu == "Estoque":
+    st.subheader("📦 Controle")
 
-  </body>
-  </html>
-  `);
-});
+    nome = st.text_input("Item")
+    qtd = st.number_input("Quantidade", 0)
+    min = st.number_input("Mínimo", 1, value=5)
 
-app.listen(3000,()=>console.log('🚀 SISTEMA ABSURDO rodando http://localhost:3000'));
+    if st.button("Salvar Item"):
+        db["estoque"].append({
+            "nome": nome,
+            "qtd": qtd,
+            "min": min
+        })
+        save_db(db)
+
+    st.divider()
+
+    for i in db["estoque"]:
+        if i["qtd"] <= i["min"]:
+            st.warning(f"⚠️ {i['nome']} baixo ({i['qtd']})")
+        else:
+            st.success(f"{i['nome']} OK ({i['qtd']})")
+
+# ===== FINANCEIRO =====
+elif menu == "Financeiro":
+    st.subheader("💰 Controle")
+
+    total = sum(f["valor"] for f in db["financeiro"]) if db["financeiro"] else 0
+
+    st.metric("Total", f"R$ {total}")
+
+    st.dataframe(pd.DataFrame(db["financeiro"]))
