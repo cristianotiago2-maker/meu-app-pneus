@@ -1,155 +1,121 @@
 import streamlit as st
 import sqlite3
-import hashlib
-from datetime import datetime
 import pandas as pd
-from io import BytesIO
-from reportlab.pdfgen import canvas
+from datetime import datetime
 
 # =========================
-# BANCO
+# CONFIG
 # =========================
-conn = sqlite3.connect("vulcat_saas.db", check_same_thread=False)
+st.set_page_config(page_title="VULCAT ERP", layout="wide")
+
+# =========================
+# BANCO DE DADOS
+# =========================
+conn = sqlite3.connect("vulcat.db", check_same_thread=False)
 c = conn.cursor()
 
-c.execute("""CREATE TABLE IF NOT EXISTS empresas (
-id INTEGER PRIMARY KEY,
+c.execute("""
+CREATE TABLE IF NOT EXISTS clientes (
+id INTEGER PRIMARY KEY AUTOINCREMENT,
 nome TEXT,
-plano TEXT
-)""")
+telefone TEXT
+)
+""")
 
-c.execute("""CREATE TABLE IF NOT EXISTS usuarios (
-id INTEGER PRIMARY KEY,
-empresa_id INTEGER,
-user TEXT,
-password TEXT,
-role TEXT
-)""")
-
-c.execute("""CREATE TABLE IF NOT EXISTS ordens (
-id INTEGER PRIMARY KEY,
-empresa_id INTEGER,
+c.execute("""
+CREATE TABLE IF NOT EXISTS ordens (
+id INTEGER PRIMARY KEY AUTOINCREMENT,
 cliente TEXT,
 servico TEXT,
 valor REAL,
 data TEXT
-)""")
+)
+""")
+
+c.execute("""
+CREATE TABLE IF NOT EXISTS estoque (
+id INTEGER PRIMARY KEY AUTOINCREMENT,
+produto TEXT,
+quantidade INTEGER
+)
+""")
 
 conn.commit()
 
 # =========================
-# UTIL
-# =========================
-def hash_pw(pw):
-    return hashlib.sha256(pw.encode()).hexdigest()
-
-# empresa demo (SaaS base)
-def criar_empresa_demo():
-    c.execute("SELECT * FROM empresas")
-    if not c.fetchall():
-        c.execute("INSERT INTO empresas VALUES (NULL,?,?)",
-                  ("VULCAT DEMO", "PRO"))
-        empresa_id = c.lastrowid
-
-        c.execute("INSERT INTO usuarios VALUES (NULL,?,?,?,?)",
-                  (empresa_id, "admin", hash_pw("1234"), "admin"))
-        conn.commit()
-
-criar_empresa_demo()
-
-# =========================
-# LOGIN SAAS
-# =========================
-if "logado" not in st.session_state:
-    st.session_state.logado = False
-    st.session_state.empresa_id = None
-
-if not st.session_state.logado:
-    st.title("🚀 VULCAT SAAS LOGIN")
-
-    user = st.text_input("Usuário")
-    pw = st.text_input("Senha", type="password")
-
-    if st.button("Entrar"):
-        c.execute("""
-        SELECT empresa_id, role FROM usuarios 
-        WHERE user=? AND password=?
-        """, (user, hash_pw(pw)))
-
-        result = c.fetchone()
-
-        if result:
-            st.session_state.logado = True
-            st.session_state.empresa_id = result[0]
-            st.success("Login OK")
-        else:
-            st.error("Erro login")
-
-    st.stop()
-
-empresa_id = st.session_state.empresa_id
-
-# =========================
 # MENU
 # =========================
-st.sidebar.title("⚙ SAAS MENU")
-
-menu = st.sidebar.radio("Navegação", [
-    "Dashboard",
-    "Clientes",
-    "Orçamentos"
-])
+st.sidebar.title("⚙ VULCAT ERP")
+menu = st.sidebar.radio("Menu", ["Dashboard", "Clientes", "Ordem", "Estoque"])
 
 # =========================
-# DASHBOARD SAAS
+# DASHBOARD
 # =========================
 if menu == "Dashboard":
-    st.title("📊 DASHBOARD SAAS")
+    st.title("📊 Dashboard")
 
-    ordens = pd.read_sql(f"""
-    SELECT * FROM ordens WHERE empresa_id={empresa_id}
-    """, conn)
+    clientes = c.execute("SELECT * FROM clientes").fetchall()
+    ordens = c.execute("SELECT * FROM ordens").fetchall()
 
-    col1, col2 = st.columns(2)
+    faturamento = sum([o[3] for o in ordens]) if ordens else 0
 
-    col1.metric("Ordens", len(ordens))
-    col2.metric("Faturamento", f"R$ {ordens['valor'].sum() if not ordens.empty else 0}")
+    col1, col2, col3 = st.columns(3)
+    col1.metric("Clientes", len(clientes))
+    col2.metric("Ordens", len(ordens))
+    col3.metric("Faturamento", f"R$ {faturamento:.2f}")
 
 # =========================
-# CLIENTES (SIMPLES SAAS)
+# CLIENTES
 # =========================
 elif menu == "Clientes":
-    st.title("👤 CLIENTES")
+    st.title("👤 Clientes")
 
     nome = st.text_input("Nome")
-    tel = st.text_input("Telefone")
+    telefone = st.text_input("Telefone")
 
-    if st.button("Salvar"):
-        st.success("Aqui você pode expandir com tabela clientes por empresa")
+    if st.button("Salvar Cliente"):
+        c.execute("INSERT INTO clientes VALUES (NULL,?,?)", (nome, telefone))
+        conn.commit()
+        st.success("Cliente salvo!")
+
+    df = pd.read_sql("SELECT * FROM clientes", conn)
+    st.dataframe(df)
 
 # =========================
-# ORÇAMENTOS SAAS
+# ORDEM DE SERVIÇO
 # =========================
-elif menu == "Orçamentos":
-    st.title("🧾 ORÇAMENTOS SAAS")
+elif menu == "Ordem":
+    st.title("🧾 Ordem de Serviço")
 
     cliente = st.text_input("Cliente")
     servico = st.selectbox("Serviço", ["Vulcanização", "Conserto", "Troca"])
     valor = st.number_input("Valor", 0.0)
 
-    if st.button("Criar"):
+    if st.button("Criar Ordem"):
         data = str(datetime.now().date())
 
-        c.execute("""
-        INSERT INTO ordens VALUES (NULL,?,?,?,?,?)
-        """, (empresa_id, cliente, servico, valor, data))
-
+        c.execute("INSERT INTO ordens VALUES (NULL,?,?,?,?)",
+                  (cliente, servico, valor, data))
         conn.commit()
 
-        st.success("Orçamento criado!")
+        st.success("Ordem criada!")
 
-    ordens = pd.read_sql(f"""
-    SELECT * FROM ordens WHERE empresa_id={empresa_id}
-    """, conn)
+    df = pd.read_sql("SELECT * FROM ordens", conn)
+    st.dataframe(df)
 
-    st.dataframe(ordens)
+# =========================
+# ESTOQUE
+# =========================
+elif menu == "Estoque":
+    st.title("📦 Estoque")
+
+    produto = st.text_input("Produto")
+    qtd = st.number_input("Quantidade", 0)
+
+    if st.button("Adicionar"):
+        c.execute("INSERT INTO estoque VALUES (NULL,?,?)", (produto, qtd))
+        conn.commit()
+        st.success("Item adicionado!")
+
+    df = pd.read_sql("SELECT * FROM estoque", conn)
+    st.dataframe(df)
