@@ -1,5 +1,1 @@
-streamlit 
-pandas
-fpdf
-plotly
-requests
+
