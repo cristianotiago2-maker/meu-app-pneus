@@ -1,7 +1,5 @@
 streamlit
 pandas
-fpdf2
 plotly
-pillow
-
-
+sqlite3
+reportlab
