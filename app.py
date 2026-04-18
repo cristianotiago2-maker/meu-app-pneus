@@ -9,47 +9,39 @@ from reportlab.pdfgen import canvas
 # =========================
 # CONFIG
 # =========================
-st.set_page_config(page_title="VULCAT ERP ULTRA", layout="wide")
-
-st.markdown("""
-<style>
-.stApp {
-    background-color: #0b1220;
-    color: white;
-}
-.box {
-    background: #111827;
-    padding: 15px;
-    border-radius: 10px;
-}
-</style>
-""", unsafe_allow_html=True)
+st.set_page_config(page_title="VULCAT ERP", layout="wide")
 
 # =========================
-# BANCO
+# BANCO DE DADOS
 # =========================
-conn = sqlite3.connect("vulcat_ultra.db", check_same_thread=False)
+conn = sqlite3.connect("vulcat.db", check_same_thread=False)
 c = conn.cursor()
 
-c.execute("""CREATE TABLE IF NOT EXISTS clientes (
+c.execute("""
+CREATE TABLE IF NOT EXISTS clientes (
 id INTEGER PRIMARY KEY AUTOINCREMENT,
 nome TEXT,
 telefone TEXT
-)""")
+)
+""")
 
-c.execute("""CREATE TABLE IF NOT EXISTS ordens (
+c.execute("""
+CREATE TABLE IF NOT EXISTS ordens (
 id INTEGER PRIMARY KEY AUTOINCREMENT,
 cliente TEXT,
 servico TEXT,
 valor REAL,
 data TEXT
-)""")
+)
+""")
 
-c.execute("""CREATE TABLE IF NOT EXISTS estoque (
+c.execute("""
+CREATE TABLE IF NOT EXISTS estoque (
 id INTEGER PRIMARY KEY AUTOINCREMENT,
 produto TEXT,
 qtd INTEGER
-)""")
+)
+""")
 
 conn.commit()
 
@@ -61,21 +53,21 @@ def gerar_pdf(titulo, linhas):
     pdf = canvas.Canvas(buffer)
 
     pdf.setFont("Helvetica-Bold", 14)
-    pdf.drawString(150, 800, titulo)
+    pdf.drawString(160, 800, titulo)
 
     y = 760
     pdf.setFont("Helvetica", 11)
 
     for linha in linhas:
         pdf.drawString(50, y, str(linha))
-        y -= 20
+        y -= 18
 
     pdf.save()
     buffer.seek(0)
     return buffer
 
 # =========================
-# MENU (ABAS BONITAS)
+# MENU
 # =========================
 tabs = st.tabs([
     "📊 Painel Geral",
@@ -99,7 +91,6 @@ with tabs[0]:
     faturamento = sum([o[3] for o in ordens]) if ordens else 0
 
     col1, col2, col3 = st.columns(3)
-
     col1.metric("Clientes", len(clientes))
     col2.metric("Ordens", len(ordens))
     col3.metric("Faturamento", f"R$ {faturamento:.2f}")
@@ -110,8 +101,7 @@ with tabs[0]:
     st.subheader("📊 Visão Geral")
     fig = px.pie(
         names=["Clientes", "Ordens", "Estoque"],
-        values=[len(clientes), len(ordens), len(estoque)],
-        title="Distribuição do Sistema"
+        values=[len(clientes), len(ordens), len(estoque)]
     )
     st.plotly_chart(fig, use_container_width=True)
 
@@ -134,16 +124,14 @@ with tabs[1]:
 
     st.subheader("👀 Pré-visualização")
 
-    st.markdown(f"""
-    <div class="box">
-    <b>Cliente:</b> {cliente}<br>
-    <b>Serviço:</b> {servico}<br>
-    <b>Valor:</b> R$ {valor}<br>
-    <b>Data:</b> {datetime.now().date()}
-    </div>
-    """, unsafe_allow_html=True)
+    st.info(f"""
+Cliente: {cliente}  
+Serviço: {servico}  
+Valor: R$ {valor}  
+Data: {datetime.now().date()}
+""")
 
-    if st.button("Gerar Orçamento"):
+    if st.button("Gerar Orçamento PDF"):
         data = str(datetime.now().date())
 
         c.execute("INSERT INTO ordens VALUES (NULL,?,?,?,?)",
@@ -164,14 +152,17 @@ with tabs[1]:
 # 3 PRODUÇÃO
 # =========================
 with tabs[2]:
-    st.title("🔧 Produção (Ficha)")
+    st.title("🔧 Produção (Ficha sem valores)")
 
-    df = pd.read_sql("SELECT cliente, servico, data FROM ordens", conn)
+    df = pd.DataFrame(
+        c.execute("SELECT cliente, servico, data FROM ordens").fetchall(),
+        columns=["Cliente","Serviço","Data"]
+    )
 
     st.dataframe(df, use_container_width=True)
 
     if not df.empty:
-        pdf = gerar_pdf("FICHA DE PRODUÇÃO (SEM VALORES)", df.values.tolist())
+        pdf = gerar_pdf("FICHA DE PRODUÇÃO", df.values.tolist())
         st.download_button("📥 PDF Produção", pdf, "producao.pdf")
 
 # =========================
@@ -180,13 +171,14 @@ with tabs[2]:
 with tabs[3]:
     st.title("💰 Financeiro")
 
-    df = pd.read_sql("SELECT * FROM ordens", conn)
+    ordens = c.execute("SELECT * FROM ordens").fetchall()
 
-    total = df["valor"].sum() if not df.empty else 0
+    total = sum([o[3] for o in ordens]) if ordens else 0
 
     st.metric("Faturamento Total", f"R$ {total:.2f}")
 
-    st.dataframe(df)
+    df = pd.DataFrame(ordens, columns=["id","cliente","servico","valor","data"])
+    st.dataframe(df, use_container_width=True)
 
     if not df.empty:
         pdf = gerar_pdf("RELATÓRIO FINANCEIRO", df.values.tolist())
@@ -205,13 +197,18 @@ with tabs[4]:
         c.execute("INSERT INTO estoque VALUES (NULL,?,?)", (produto, qtd))
         conn.commit()
 
-    df = pd.read_sql("SELECT * FROM estoque", conn)
-    st.dataframe(df)
+    df = pd.DataFrame(
+        c.execute("SELECT * FROM estoque").fetchall(),
+        columns=["ID","Produto","Qtd"]
+    )
+
+    st.dataframe(df, use_container_width=True)
 
     st.subheader("⚠ Alertas")
+
     for i in df.values:
         if i[2] < 5:
-            st.error(f"Estoque baixo: {i[1]} ({i[2]})")
+            st.warning(f"Estoque baixo: {i[1]} ({i[2]})")
 
 # =========================
 # 6 CLIENTES
@@ -226,5 +223,9 @@ with tabs[5]:
         c.execute("INSERT INTO clientes VALUES (NULL,?,?)", (nome, tel))
         conn.commit()
 
-    df = pd.read_sql("SELECT * FROM clientes", conn)
-    st.dataframe(df)
+    df = pd.DataFrame(
+        c.execute("SELECT * FROM clientes").fetchall(),
+        columns=["ID","Nome","Telefone"]
+    )
+
+    st.dataframe(df, use_container_width=True)
