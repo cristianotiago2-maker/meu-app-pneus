@@ -1,6 +1,7 @@
+
 streamlit
 pandas
 fpdf
 plotly
-requests
+streamlit-option-menu
 
