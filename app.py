@@ -4,7 +4,12 @@ import pandas as pd
 from datetime import datetime
 from io import BytesIO
 from reportlab.pdfgen import canvas
+st.sidebar.title("🏢 Dados da Empresa")
 
+empresa_nome = st.sidebar.text_input("Nome da Empresa", "VULCAT PNEUS")
+telefone = st.sidebar.text_input("Telefone")
+endereco = st.sidebar.text_input("Endereço")
+logo = st.sidebar.file_uploader("Logo (imagem)")
 # =========================
 # CONFIG
 # =========================
