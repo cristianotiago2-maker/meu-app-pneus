@@ -1,93 +1,97 @@
 import streamlit as st
 import pandas as pd
 from datetime import datetime
+from fpdf import FPDF
 
 # 1. CONFIGURAÇÃO DA PÁGINA
-st.set_page_config(page_title="Vulcat Pneus", page_icon="🛞", layout="wide")
+st.set_page_config(page_title="Vulcat Pneus PRO", page_icon="🛞", layout="wide")
 
-# 2. BARRA LATERAL (CONFIGURAÇÕES DA EMPRESA)
+# 2. CLASSE PARA GERAR PDF PERSONALIZADO
+class VulcatPDF(FPDF):
+    def header(self):
+        self.set_font("Arial", "B", 15)
+        self.cell(0, 10, "VULCAT PNEUS - SISTEMA DE GESTÃO", ln=True, align="C")
+        self.set_font("Arial", "I", 10)
+        self.cell(0, 5, f"Gerado em: {datetime.now().strftime('%d/%m/%Y %H:%M')}", ln=True, align="R")
+        self.ln(10)
+
+def exportar_tabela_pdf(titulo, colunas, dados):
+    pdf = VulcatPDF()
+    pdf.add_page()
+    pdf.set_font("Arial", "B", 14)
+    pdf.cell(0, 10, titulo.upper(), ln=True)
+    pdf.ln(5)
+    
+    # Cabeçalho da Tabela
+    pdf.set_font("Arial", "B", 10)
+    for col in colunas:
+        pdf.cell(45, 8, col, 1)
+    pdf.ln()
+    
+    # Dados
+    pdf.set_font("Arial", "", 10)
+    for row in dados:
+        for item in row:
+            pdf.cell(45, 8, str(item), 1)
+        pdf.ln()
+    return pdf.output(dest='S').encode('latin-1', 'replace')
+
+# 3. SIDEBAR (DADOS DA EMPRESA)
 with st.sidebar:
-    st.header("🏢 Dados da Empresa")
-    # Logotipo
-    try:
-        st.image("logo.png", width=150)
-    except:
-        st.info("Suba o 'logo.png' no GitHub")
-    
-    # Informações Editáveis
-    nome_app = st.text_input("Nome do Sistema", "Vulcat Pneus")
-    icone_topo = st.text_input("Ícone do Topo (Emoji)", "🚜")
+    st.header("🏢 Configuração")
+    logo_url = st.text_input("Link do Logo", "https://flaticon.com")
+    if logo_url: st.image(logo_url, width=150)
+    nome_empresa = st.text_input("Empresa", "VULCAT PNEUS")
     cnpj = st.text_input("CNPJ", "00.000.000/0001-00")
-    endereco = st.text_area("Endereço", "Rua Exemplo, 123")
-    telefone = st.text_input("Telefone/WhatsApp", "(00) 00000-0000")
-    
-    st.divider()
-    st.caption(f"{nome_app} - v2.0")
 
-# 3. CABEÇALHO DINÂMICO
-st.title(f"{icone_topo} {nome_app}")
-st.write(f"**CNPJ:** {cnpj} | **Tel:** {telefone}")
+# 4. DASHBOARD (PAINEL GERAL)
+st.title(f"🚜 {nome_empresa}")
+tabs = st.tabs(["📄 Orçamento", "🛠️ Produção", "💰 Financeiro", "📦 Estoque", "👥 Clientes"])
 
-# 4. ABAS DE NAVEGAÇÃO (Para não poluir o visual)
-aba1, aba2, aba3, aba4 = st.tabs(["📋 Orçamento Pneus", "👥 Clientes", "📦 Estoque", "📸 Recibos"])
+# --- ABA 1: ORÇAMENTO ---
+with tabs[0]:
+    st.subheader("Orçamento Formal")
+    df_orc = pd.DataFrame([{"Item": "Pneu 295/80", "Qtd": 1, "Preço": 450.00}])
+    edit_orc = st.data_editor(df_orc, num_rows="dynamic", use_container_width=True, key="o")
+    if st.button("📥 Baixar PDF Orçamento"):
+        pdf = exportar_tabela_pdf("Orçamento ao Cliente", edit_orc.columns, edit_orc.values)
+        st.download_button("Clique para Salvar PDF", pdf, "orcamento.pdf", "application/pdf")
 
-# --- ABA 1: ORÇAMENTO ESPECÍFICO DE PNEUS ---
-with aba1:
-    st.subheader("📝 Orçamento Detalhado de Pneus")
-    
-    # Tabela editável com campos específicos para pneus
-    dados_pneus = {
-        "Frota/Veículo": ["Caminhão 01", "Trator 05"],
-        "Medida do Pneu": ["295/80 R22.5", "18.4-34"],
-        "Serviço": ["Recapagem", "Conserto"],
-        "Qtd": [1, 1],
-        "Valor Unit. (R$)": [0.0, 0.0]
-    }
-    df_pneus = pd.DataFrame(dados_pneus)
-    
-    grid_pneus = st.data_editor(df_pneus, num_rows="dynamic", use_container_width=True, key="pneus_edit")
-    
-    total_pneus = (grid_pneus["Qtd"] * grid_pneus["Valor Unit. (R$)"]).sum()
-    st.metric("Total do Orçamento", f"R$ {total_pneus:,.2f}")
-    
-    if st.button("📄 Gerar PDF do Orçamento"):
-        st.info("Função de exportação PDF pronta. (Simulada: Os dados foram processados para impressão)")
+# --- ABA 2: PRODUÇÃO ---
+with tabs[1]:
+    st.subheader("Ficha de Oficina (Sem Valores)")
+    df_prod = pd.DataFrame([{"OS": "101", "Pneu": "Série X", "Status": "Raspagem"}])
+    edit_prod = st.data_editor(df_prod, num_rows="dynamic", use_container_width=True, key="p")
+    if st.button("📥 Baixar Ficha de Oficina"):
+        pdf = exportar_tabela_pdf("Ficha de Produção", edit_prod.columns, edit_prod.values)
+        st.download_button("Clique para Salvar Ficha", pdf, "producao.pdf", "application/pdf")
 
-# --- ABA 2: CLIENTES ---
-with aba2:
-    st.subheader("👥 Cadastro de Clientes")
-    df_clientes = pd.DataFrame({"Nome/Razão Social": [""], "CPF/CNPJ": [""], "Contato": [""]})
-    st.data_editor(df_clientes, num_rows="dynamic", use_container_width=True)
+# --- ABA 3: FINANCEIRO ---
+with tabs[2]:
+    st.subheader("Fluxo de Caixa")
+    df_fin = pd.DataFrame([{"Data": "18/04", "Tipo": "Entrada", "Valor": 0.0}])
+    edit_fin = st.data_editor(df_fin, num_rows="dynamic", use_container_width=True, key="f")
+    if st.button("📥 Baixar Relatório Financeiro"):
+        pdf = exportar_tabela_pdf("Relatório Financeiro", edit_fin.columns, edit_fin.values)
+        st.download_button("Clique para Salvar Relatório", pdf, "financeiro.pdf", "application/pdf")
 
-# --- ABA 3: ESTOQUE ---
-with aba3:
-    st.subheader("📦 Controle de Estoque")
-    df_estoque = pd.DataFrame({"Produto": ["Pneu Novo", "Banda de Rodagem"], "Estoque Atual": [0], "Minimo": [5]})
-    st.data_editor(df_estoque, num_rows="dynamic", use_container_width=True)
+# --- ABA 4: ESTOQUE ---
+with tabs[3]:
+    st.subheader("Controle de Estoque")
+    df_est = pd.DataFrame([{"Item": "Cola", "Qtd": 10}])
+    edit_est = st.data_editor(df_est, num_rows="dynamic", use_container_width=True, key="e")
+    if st.button("📥 Baixar Lista de Estoque"):
+        pdf = exportar_tabela_pdf("Relatório de Estoque", edit_est.columns, edit_est.values)
+        st.download_button("Clique para Salvar Estoque", pdf, "estoque.pdf", "application/pdf")
 
-# --- ABA 4: FOTOS ---
-with aba4:
-    st.subheader("📸 Notas e Comprovantes")
-    fotos = st.file_uploader("Anexar arquivos", type=['png', 'jpg', 'pdf'], accept_multiple_files=True)
-    if fotos:
-        cols = st.columns(4)
-        for i, f in enumerate(fotos):
-            with cols[i % 4]:
-                st.image(f, use_container_width=True)
-
-# 5. RODAPÉ DE IMPRESSÃO
-st.divider()
-if st.button("🖨️ Modo de Impressão (Visualizar PDF)"):
-    st.write(f"### {nome_app}")
-    st.write(f"Endereço: {endereco}")
-    st.write(f"Dados do Orçamento: {datetime.now().strftime('%d/%m/%Y')}")
-    st.table(grid_pneus)
-
-
-
-
-
-
+# --- ABA 5: CLIENTES ---
+with tabs[4]:
+    st.subheader("Cadastro de Clientes")
+    df_cli = pd.DataFrame([{"Nome": "João Silva", "Telefone": "00-0000"}])
+    edit_cli = st.data_editor(df_cli, num_rows="dynamic", use_container_width=True, key="c")
+    if st.button("📥 Baixar Lista de Clientes"):
+        pdf = exportar_tabela_pdf("Lista de Clientes", edit_cli.columns, edit_cli.values)
+        st.download_button("Clique para Salvar Contatos", pdf, "clientes.pdf", "application/pdf")
 
 
 
