@@ -1,45 +1,65 @@
 import streamlit as st
 import pandas as pd
-import plotly.express as px
 from datetime import datetime
 import os
 
-# PDF
-from reportlab.lib.pagesizes import A4
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
-from reportlab.lib import colors
-from reportlab.lib.styles import getSampleStyleSheet
-import tempfile
+# -------- CONFIG --------
+st.set_page_config(page_title="VULCAT PNEUS", layout="wide")
 
-# ---------------- CONFIG ----------------
-st.set_page_config(page_title="VULCAT PNEUS", layout="wide", page_icon="🛞")
+# -------- ESTILO --------
+st.markdown("""
+<style>
+.main {background-color: #0E1117;}
+h1, h2, h3 {color: white;}
+[data-testid="metric-container"] {
+    background-color: #1c1f26;
+    padding: 15px;
+    border-radius: 10px;
+}
+</style>
+""", unsafe_allow_html=True)
 
-# ---------------- BANCO (SALVA EM CSV) ----------------
-def carregar(nome):
+# -------- LOGIN --------
+if "logado" not in st.session_state:
+    st.session_state.logado = False
+
+if not st.session_state.logado:
+    st.title("🔐 Login - VULCAT PNEUS")
+    user = st.text_input("Usuário")
+    senha = st.text_input("Senha", type="password")
+
+    if st.button("Entrar"):
+        if user == "admin" and senha == "1234":
+            st.session_state.logado = True
+            st.rerun()
+        else:
+            st.error("Login inválido")
+
+    st.stop()
+
+# -------- FUNÇÕES --------
+def carregar(nome, colunas):
     if os.path.exists(nome):
         return pd.read_csv(nome)
-    return pd.DataFrame()
+    return pd.DataFrame(columns=colunas)
 
 def salvar(df, nome):
     df.to_csv(nome, index=False)
 
-clientes = carregar("clientes.csv")
-estoque = carregar("estoque.csv")
-financeiro = carregar("financeiro.csv")
+# -------- BANCO --------
+clientes = carregar("clientes.csv", ["Nome", "Telefone"])
+estoque = carregar("estoque.csv", ["Item", "Quantidade"])
+financeiro = carregar("financeiro.csv", ["Data", "Tipo", "Valor"])
 
-if clientes.empty:
-    clientes = pd.DataFrame(columns=["Nome", "Telefone"])
-if estoque.empty:
-    estoque = pd.DataFrame(columns=["Item", "Quantidade"])
-if financeiro.empty:
-    financeiro = pd.DataFrame(columns=["Data", "Tipo", "Valor"])
-
-# ---------------- SIDEBAR ----------------
+# -------- SIDEBAR --------
 with st.sidebar:
-    st.title("🛞 VULCAT PNEUS")
+    st.title("🛞 VULCAT")
     menu = st.radio("Menu", ["Dashboard", "Orçamento", "Estoque", "Financeiro", "Clientes"])
+    if st.button("Sair"):
+        st.session_state.logado = False
+        st.rerun()
 
-# ---------------- DASHBOARD ----------------
+# -------- DASHBOARD --------
 if menu == "Dashboard":
     st.title("📊 Painel Geral")
 
@@ -47,114 +67,88 @@ if menu == "Dashboard":
     saidas = financeiro[financeiro["Tipo"] == "Saída"]["Valor"].sum()
     saldo = entradas - saidas
 
-    total_clientes = len(clientes)
-    total_estoque = estoque["Quantidade"].sum()
-
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("Entradas", f"R$ {entradas:,.2f}")
     c2.metric("Saídas", f"R$ {saidas:,.2f}")
     c3.metric("Saldo", f"R$ {saldo:,.2f}")
-    c4.metric("Clientes", total_clientes)
+    c4.metric("Clientes", len(clientes))
 
     st.divider()
 
-    col1, col2 = st.columns(2)
-
-    if entradas > 0 or saidas > 0:
-        fig = px.pie(values=[entradas, saidas], names=["Entradas", "Saídas"], hole=0.5)
-        col1.plotly_chart(fig, use_container_width=True)
-
     if not estoque.empty:
-        fig2 = px.bar(estoque, x="Item", y="Quantidade")
-        col2.plotly_chart(fig2, use_container_width=True)
+        st.subheader("📦 Estoque")
+        st.dataframe(estoque)
 
-    # ALERTA
     baixo = estoque[estoque["Quantidade"] < 5]
     if not baixo.empty:
-        st.warning("⚠️ Estoque baixo:")
+        st.warning("⚠️ Estoque baixo")
         st.dataframe(baixo)
 
-# ---------------- PDF ----------------
-def gerar_pdf(cliente, itens, total):
-    styles = getSampleStyleSheet()
-    file = tempfile.NamedTemporaryFile(delete=False, suffix=".pdf")
-    doc = SimpleDocTemplate(file.name, pagesize=A4)
-
-    elementos = []
-    elementos.append(Paragraph("<b>VULCAT PNEUS</b>", styles['Title']))
-    elementos.append(Paragraph(f"Cliente: {cliente}", styles['Normal']))
-    elementos.append(Spacer(1, 12))
-
-    data = [["Item", "Qtd", "Valor", "Total"]]
-    for _, row in itens.iterrows():
-        total_item = row["Qtd"] * row["Valor"]
-        data.append([row["Item"], row["Qtd"], row["Valor"], total_item])
-
-    tabela = Table(data)
-    tabela.setStyle(TableStyle([("GRID", (0,0), (-1,-1), 1, colors.black)]))
-    elementos.append(tabela)
-
-    elementos.append(Spacer(1, 12))
-    elementos.append(Paragraph(f"Total: R$ {total:.2f}", styles['Heading2']))
-
-    doc.build(elementos)
-    return file.name
-
-# ---------------- ORÇAMENTO ----------------
+# -------- ORÇAMENTO --------
 elif menu == "Orçamento":
     st.title("📄 Orçamento")
 
     cliente = st.selectbox("Cliente", [""] + clientes["Nome"].tolist())
 
-    df = pd.DataFrame([{"Item": "", "Qtd": 1, "Valor": 0.0}])
-    edit = st.data_editor(df, num_rows="dynamic", use_container_width=True)
+    item = st.text_input("Serviço/Produto")
+    qtd = st.number_input("Qtd", min_value=1, value=1)
+    valor = st.number_input("Valor", min_value=0.0)
 
-    total = (edit["Qtd"] * edit["Valor"]).sum()
+    total = qtd * valor
     st.metric("Total", f"R$ {total:,.2f}")
 
-    col1, col2 = st.columns(2)
-
-    with col1:
-        if st.button("💾 Salvar como Entrada"):
-            financeiro.loc[len(financeiro)] = [datetime.now(), "Entrada", total]
+    if st.button("Salvar como entrada"):
+        if cliente == "":
+            st.warning("Selecione um cliente")
+        else:
+            novo = pd.DataFrame([[datetime.now(), "Entrada", total]],
+                                columns=["Data", "Tipo", "Valor"])
+            financeiro = pd.concat([financeiro, novo], ignore_index=True)
             salvar(financeiro, "financeiro.csv")
-            st.success("Salvo!")
+            st.success("Salvo no financeiro!")
 
-    with col2:
-        if st.button("📄 Gerar PDF"):
-            if cliente == "":
-                st.warning("Selecione um cliente")
-            else:
-                pdf = gerar_pdf(cliente, edit, total)
-                with open(pdf, "rb") as f:
-                    st.download_button("⬇️ Baixar PDF", f, "orcamento.pdf")
-
-# ---------------- ESTOQUE ----------------
+# -------- ESTOQUE --------
 elif menu == "Estoque":
     st.title("📦 Estoque")
 
-    estoque = st.data_editor(estoque, num_rows="dynamic", use_container_width=True)
+    item = st.text_input("Item")
+    qtd = st.number_input("Quantidade", min_value=0)
 
-    if st.button("Salvar Estoque"):
+    if st.button("Adicionar"):
+        novo = pd.DataFrame([[item, qtd]], columns=["Item", "Quantidade"])
+        estoque = pd.concat([estoque, novo], ignore_index=True)
         salvar(estoque, "estoque.csv")
-        st.success("Salvo!")
+        st.success("Adicionado!")
 
-# ---------------- FINANCEIRO ----------------
+    st.dataframe(estoque)
+
+# -------- FINANCEIRO --------
 elif menu == "Financeiro":
     st.title("💰 Financeiro")
 
-    financeiro = st.data_editor(financeiro, num_rows="dynamic", use_container_width=True)
+    tipo = st.selectbox("Tipo", ["Entrada", "Saída"])
+    valor = st.number_input("Valor", min_value=0.0)
 
-    if st.button("Salvar Financeiro"):
+    if st.button("Salvar"):
+        novo = pd.DataFrame([[datetime.now(), tipo, valor]],
+                            columns=["Data", "Tipo", "Valor"])
+        financeiro = pd.concat([financeiro, novo], ignore_index=True)
         salvar(financeiro, "financeiro.csv")
         st.success("Salvo!")
 
-# ---------------- CLIENTES ----------------
+    st.dataframe(financeiro)
+
+# -------- CLIENTES --------
 elif menu == "Clientes":
     st.title("👥 Clientes")
 
-    clientes = st.data_editor(clientes, num_rows="dynamic", use_container_width=True)
+    nome = st.text_input("Nome")
+    tel = st.text_input("Telefone")
 
-    if st.button("Salvar Clientes"):
+    if st.button("Adicionar"):
+        novo = pd.DataFrame([[nome, tel]], columns=["Nome", "Telefone"])
+        clientes = pd.concat([clientes, novo], ignore_index=True)
         salvar(clientes, "clientes.csv")
-        st.success("Salvo!")
+        st.success("Cliente salvo!")
+
+    st.dataframe(clientes)
