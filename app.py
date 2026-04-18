@@ -89,8 +89,8 @@ menu = st.tabs([
 # 1 PAINEL GERAL
 # =========================
 with menu[0]:
-    st.title("📊 PAINEL GERAL")
-
+    st.title("📊 PAINEL GERAL")  
+import plotly.express as px
     clientes = c.execute("SELECT * FROM clientes").fetchall()
     ordens = c.execute("SELECT * FROM ordens").fetchall()
     estoque = c.execute("SELECT * FROM estoque").fetchall()
@@ -102,7 +102,22 @@ with menu[0]:
     col1.metric("Clientes", len(clientes))
     col2.metric("Ordens", len(ordens))
     col3.metric("Faturamento", f"R$ {faturamento:.2f}")
+st.subheader("📊 Distribuição do Sistema")
 
+labels = ["Clientes", "Ordens", "Estoque"]
+values = [
+    len(clientes),
+    len(ordens),
+    len(estoque)
+]
+
+fig = px.pie(
+    names=labels,
+    values=values,
+    title="Visão Geral do Sistema"
+)
+
+st.plotly_chart(fig, use_container_width=True)
 # =========================
 # 2 ORÇAMENTOS
 # =========================
