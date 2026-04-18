@@ -1,6 +1,7 @@
 streamlit
 pandas
 fpdf2
+openpyx1
 
 
 
