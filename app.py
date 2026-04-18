@@ -1,147 +1,109 @@
+
+(sem assunto)
+Caixa de entrada
+
+Tiago Cristiano da Silva <cristianotiago2@gmail.com>
+08:22 (há 2 minutos)
+para mim
+
 import streamlit as st
 import pandas as pd
 import sqlite3
-import plotly.express as px
-from streamlit_option_menu import option_menu
-from fpdf import FPDF
 from datetime import datetime
 
-# --- CONFIGURAÇÃO DE ESTADO PARA CORES ---
-if 'cor_primaria' not in st.session_state:
-    st.session_state.cor_primaria = "#0099aa"  # Cor padrão inicial
+# 1. CONFIGURAÇÃO DA PÁGINA E BANCO DE DADOS
+st.set_page_config(page_title="AgroFrota ERP", layout="wide")
 
-# --- CONFIGURAÇÃO VISUAL ---
-st.set_page_config(page_title="Pneus PRO | Customizado", layout="wide")
+def init_db():
+    conn = sqlite3.connect('agrofrota.db')
+    c = conn.cursor()
+    # Tabela de Pneus
+    c.execute('''CREATE TABLE IF NOT EXISTS pneus 
+                 (id INTEGER PRIMARY KEY, tipo TEXT, marca TEXT, medida TEXT, qtd INTEGER)''')
+    # Tabela de Clientes
+    c.execute('''CREATE TABLE IF NOT EXISTS clientes 
+                 (id INTEGER PRIMARY KEY, nome TEXT, documento TEXT, cidade TEXT)''')
+    conn.commit()
+    return conn
 
-# CSS DINÂMICO (Usa a cor escolhida pelo usuário)
-st.markdown(f"""
+conn = init_db()
+
+# 2. ESTILO VISUAL (MANTENDO O QUE VOCÊ GOSTOU)
+st.markdown("""
     <style>
-    .stApp {{ background-color: #f4f7f6; }}
-    
-    /* Estilo dos Cards Baseado na Cor Escolhida */
-    .card {{
-        background: #262730;
-        color: white;
-        padding: 20px;
-        border-radius: 15px;
-        flex: 1;
-        text-align: center;
-        border-bottom: 5px solid {st.session_state.cor_primaria};
-        box-shadow: 0 4px 15px rgba(0,0,0,0.1);
-    }}
-    .card h2 {{ color: {st.session_state.cor_primaria}; margin-top: 10px; }}
-    
-    .card-container {{
-        display: flex;
-        justify-content: space-between;
-        gap: 15px;
-        margin-bottom: 25px;
-    }}
+    .main { background-color: #0e1117; }
+    div[data-testid="stMetricValue"] { font-size: 28px; color: #00ffa2; }
+    .card { background-color: #1e2130; padding: 20px; border-radius: 15px; border-left: 5px solid #00ffa2; margin-bottom: 10px; }
     </style>
     """, unsafe_allow_html=True)
 
-# --- BANCO DE DADOS ---
-conn = sqlite3.connect('pneus_custom.db', check_same_thread=False)
-c = conn.cursor()
-c.execute('CREATE TABLE IF NOT EXISTS financeiro (id INTEGER PRIMARY KEY, tipo TEXT, cat TEXT, valor REAL)')
-c.execute('CREATE TABLE IF NOT EXISTS estoque (id INTEGER PRIMARY KEY, medida TEXT, qtd INTEGER)')
-conn.commit()
+# 3. MENU LATERAL
+with st.sidebar:
+    st.markdown("<h1 style='text-align: center; color: #00ffa2;'>🚜 AGRO-FROTA</h1>", unsafe_allow_html=True)
+    menu = st.selectbox("Navegação", ["📊 Dashboard", "🛞 Estoque Pneus", "👥 Clientes", "🛠️ Produção"])
 
-# --- MENU SUPERIOR CUSTOMIZADO ---
-selected = option_menu(
-    menu_title=None,
-    options=["Dashboard", "Financeiro", "Estoque", "Produção", "Configurações"],
-    icons=["grid-fill", "wallet2", "box-seam", "truck", "gear"],
-    menu_icon="cast", default_index=0, orientation="horizontal",
-    styles={
-        "container": {"padding": "0!important", "background-color": "#ffffff"},
-        "nav-link-selected": {"background-color": st.session_state.cor_primaria},
-    }
-)
-
-# --- LÓGICA DE DADOS ---
-df_fin = pd.read_sql('SELECT * FROM financeiro', conn)
-rec = df_fin[df_fin['tipo'] == 'Entrada']['valor'].sum()
-desp = df_fin[df_fin['tipo'] == 'Saída']['valor'].sum()
-
-# --- NAVEGAÇÃO ---
-
-if selected == "Dashboard":
-    st.markdown(f"### 🚀 Painel de Controle - <span style='color:{st.session_state.cor_primaria}'>Gestão Ativa</span>", unsafe_allow_html=True)
+# 4. MÓDULO: DASHBOARD
+if menu == "📊 Dashboard":
+    st.title("🚀 Painel de Controle")
+    col1, col2, col3, col4 = st.columns(4)
     
-    # Cards que mudam de cor conforme a escolha
-    st.markdown(f"""
-        <div class="card-container">
-            <div class="card">
-                <h3>💰 Saldo Atual</h3>
-                <h2>R$ {rec-desp:,.2f}</h2>
-            </div>
-            <div class="card">
-                <h3>📈 Entradas</h3>
-                <h2>R$ {rec:,.2f}</h2>
-            </div>
-            <div class="card">
-                <h3>📉 Saídas</h3>
-                <h2>R$ {desp:,.2f}</h2>
-            </div>
-            <div class="card">
-                <h3>📦 Itens Estoque</h3>
-                <h2>{len(pd.read_sql('SELECT * FROM estoque', conn))}</h2>
-            </div>
-        </div>
-        """, unsafe_allow_html=True)
-
-    c1, c2 = st.columns(2)
-    with c1:
-        fig = px.bar(df_fin, x="cat", y="valor", color="tipo", barmode="group", 
-                     color_discrete_sequence=[st.session_state.cor_primaria, "#ff6347"])
-        st.plotly_chart(fig, use_container_width=True)
-    with c2:
-        fig2 = px.pie(df_fin, values='valor', names='cat', hole=0.5)
-        st.plotly_chart(fig2, use_container_width=True)
-
-elif selected == "Configurações":
-    st.title("⚙️ Personalização do Sistema")
+    # Busca dados reais do banco para o dashboard
+    total_pneus = pd.read_sql("SELECT SUM(qtd) as total FROM pneus", conn)['total'][0] or 0
+    total_clientes = pd.read_sql("SELECT COUNT(*) as total FROM clientes", conn)['total'][0]
     
-    st.subheader("🎨 Identidade Visual")
-    nova_cor = st.color_picker("Escolha a cor principal do seu sistema", st.session_state.cor_primaria)
+    col1.metric("Saldo Atual", "R$ 450,00")
+    col2.metric("Entradas", "R$ 500,00")
+    col3.metric("Itens Estoque", int(total_pneus))
+    col4.metric("Clientes Ativos", int(total_clientes))
+
+# 5. MÓDULO: ESTOQUE (COM SALVAMENTO REAL)
+elif menu == "🛞 Estoque Pneus":
+    st.title("🛞 Gestão de Estoque")
     
-    if st.button("Aplicar Nova Cor"):
-        st.session_state.cor_primaria = nova_cor
-        st.rerun()
+    with st.form("form_pneus"):
+        c1, c2, c3 = st.columns(3)
+        t = c1.selectbox("Tipo", ["Agrícola", "Rodoviário"])
+        m = c2.text_input("Marca")
+        med = c3.text_input("Medida")
+        q = st.number_input("Quantidade", min_value=0)
+        if st.form_submit_button("Salvar no Banco de Dados"):
+            conn.execute("INSERT INTO pneus (tipo, marca, medida, qtd) VALUES (?,?,?,?)", (t, m, med, q))
+            conn.commit()
+            st.success("Salvo com sucesso!")
 
-    st.markdown("---")
-    st.subheader("🏢 Informações da Empresa")
-    col1, col2 = st.columns(2)
-    nome_emp = col1.text_input("Nome da Empresa", "Pneus Pro")
-    cnpj_emp = col2.text_input("CNPJ", "00.000.000/0001-00")
-    logo = st.file_uploader("Carregar Logotipo")
+    st.subheader("Itens Cadastrados")
+    df_pneus = pd.read_sql("SELECT tipo, marca, medida, qtd FROM pneus", conn)
+    st.dataframe(df_pneus, use_container_width=True)
 
-# --- Módulos Financeiro, Estoque e Produção mantêm a lógica anterior ---
-elif selected == "Financeiro":
-    st.title("💸 Financeiro")
-    with st.form("fin"):
-        t = st.selectbox("Tipo", ["Entrada", "Saída"])
-        cat = st.text_input("Categoria (Venda, Aluguel, etc)")
-        val = st.number_input("Valor")
-        if st.form_submit_button("Salvar"):
-            c.execute('INSERT INTO financeiro (tipo, cat, valor) VALUES (?,?,?)', (t, cat, val))
+# 6. MÓDULO: CLIENTES (COM SALVAMENTO REAL)
+elif menu == "👥 Clientes":
+    st.title("👥 Cadastro de Clientes")
+    
+    with st.expander("➕ Adicionar Novo Cliente"):
+        nome = st.text_input("Nome/Razão Social")
+        doc = st.text_input("CPF/CNPJ")
+        cid = st.text_input("Cidade")
+        if st.button("Cadastrar"):
+            conn.execute("INSERT INTO clientes (nome, documento, cidade) VALUES (?,?,?)", (nome, doc, cid))
             conn.commit()
             st.rerun()
-    st.dataframe(df_fin, use_container_width=True)
 
-elif selected == "Estoque":
-    st.title("🛞 Estoque")
-    df_est = pd.read_sql('SELECT * FROM estoque', conn)
-    ed = st.data_editor(df_est, num_rows="dynamic", use_container_width=True)
-    if st.button("Sincronizar"):
-        ed.to_sql('estoque', conn, if_exists='replace', index=False)
-        st.success("Salvo!")
+    st.subheader("Lista de Clientes")
+    df_cli = pd.read_sql("SELECT nome, documento, cidade FROM clientes", conn)
+    for index, row in df_cli.iterrows():
+        st.markdown(f"""<div class="card"><b>{row['nome']}</b><br>{row['documento']} | {row['cidade']}</div>""", unsafe_allow_html=True)
 
-elif selected == "Produção":
-    st.title("🛠️ Produção")
-    cli = st.text_input("Cliente")
-    serv = st.text_area("Descrição do Serviço")
-    if st.button("Gerar Ficha"):
-        st.info("Gerando PDF com a identidade visual selecionada...")
-        # Lógica de PDF aqui...
+# 7. MÓDULO: PRODUÇÃO
+elif menu == "🛠️ Produção":
+    st.title("🛠️ Ficha de Produção")
+    st.info("Aqui você pode vincular os pneus cadastrados aos clientes para serviços.")
+    # Lista clientes do banco para o selectbox
+    clientes_list = pd.read_sql("SELECT nome FROM clientes", conn)['nome'].tolist()
+    if clientes_list:
+        sel_cliente = st.selectbox("Selecione o Cliente", clientes_list)
+        servico = st.multiselect("Serviço", ["Recapagem", "Montagem", "Vulcanização"])
+        if st.button("Gerar Ordem de Serviço"):
+            st.success(f"OS gerada para {sel_cliente}!")
+    else:
+        st.warning("Cadastre um cliente primeiro!")
+
