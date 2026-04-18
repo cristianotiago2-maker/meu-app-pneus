@@ -5,151 +5,144 @@ from datetime import datetime
 from fpdf import FPDF
 import io
 
-# 1. CONFIGURAÇÃO DA PÁGINA
-st.set_page_config(page_title="VULCAT PNEUS - PRO", layout="wide", page_icon="🛞")
+# 1. CONFIGURAÇÃO E MEMÓRIA DO APP (Faz as abas se comunicarem)
+st.set_page_config(page_title="VULCAT PNEUS - SISTEMA GESTÃO", layout="wide", page_icon="🛞")
 
-# 2. INICIALIZAÇÃO DA MEMÓRIA (FAZ AS ABAS SE COMUNICAREM)
-if 'clientes' not in st.session_state:
-    st.session_state.clientes = pd.DataFrame(columns=["Nome", "CPF/CNPJ", "Telefone", "Endereço"])
-if 'catalogo' not in st.session_state:
-    st.session_state.catalogo = pd.DataFrame(columns=["Medida", "Preço Base"])
-if 'financeiro' not in st.session_state:
-    st.session_state.financeiro = pd.DataFrame(columns=["Data", "Tipo", "Descrição", "Valor"])
+if 'db_clientes' not in st.session_state:
+    st.session_state.db_clientes = pd.DataFrame(columns=["Nome", "CPF/CNPJ", "Telefone", "Endereço", "Cidade"])
+if 'db_catalogo' not in st.session_state:
+    st.session_state.db_catalogo = pd.DataFrame(columns=["Medida", "Aplicação", "Preço Base"])
+if 'db_financeiro' not in st.session_state:
+    st.session_state.db_financeiro = pd.DataFrame(columns=["Data", "Tipo", "Descrição", "Valor"])
 
-# 3. FUNÇÃO PARA GERAR PDF REAL (COM LINHA DE ASSINATURA)
-def gerar_pdf_orcamento(empresa, cliente_dados, itens, total, pagto, datas):
-    pdf = FPDF()
-    pdf.add_page()
-    pdf.set_font("Arial", "B", 16)
-    pdf.cell(0, 10, empresa['nome'].upper(), ln=True, align="C")
-    pdf.set_font("Arial", "", 10)
-    pdf.cell(0, 5, f"CNPJ: {empresa['cnpj']} | Tel: {empresa['tel']}", ln=True, align="C")
-    pdf.cell(0, 5, empresa['end'], ln=True, align="C")
-    pdf.ln(10)
-    
-    pdf.set_font("Arial", "B", 12)
-    pdf.cell(0, 10, "DADOS DO CLIENTE", ln=True)
-    pdf.set_font("Arial", "", 11)
-    pdf.cell(0, 7, f"Nome: {cliente_dados['nome']}", ln=True)
-    pdf.cell(0, 7, f"CPF/CNPJ: {cliente_dados['doc']} | Tel: {cliente_dados['tel']}", ln=True)
-    pdf.cell(0, 7, f"Endereço: {cliente_dados['end']}", ln=True)
-    pdf.ln(5)
-    
-    pdf.set_font("Arial", "B", 11)
-    pdf.cell(0, 7, f"Entrada: {datas['ent']} | Previsão Saída: {datas['sai']}", ln=True)
-    pdf.ln(5)
+# 2. FUNÇÕES DE FORMATAÇÃO AUTOMÁTICA
+def format_cnpj(v):
+    v = ''.join(filter(str.isdigit, v))
+    if len(v) == 14: return f"{v[:2]}.{v[2:5]}.{v[5:8]}/{v[8:12]}-{v[12:]}"
+    return v
 
-    # Tabela de Itens
-    pdf.set_font("Arial", "B", 10)
-    pdf.cell(80, 8, "Item/Medida", 1)
-    pdf.cell(30, 8, "Qtd", 1)
-    pdf.cell(40, 8, "V. Unit (R$)", 1)
-    pdf.cell(40, 8, "Subtotal", 1)
-    pdf.ln()
+def format_tel(v):
+    v = ''.join(filter(str.isdigit, v))
+    if len(v) == 11: return f"({v[:2]}) {v[2:7]}-{v[7:]}"
+    return v
 
-    pdf.set_font("Arial", "", 10)
-    for _, row in itens.iterrows():
-        sub = row['Qtd'] * row['V. Unit.']
-        pdf.cell(80, 8, str(row['Item/Medida']), 1)
-        pdf.cell(30, 8, str(row['Qtd']), 1)
-        pdf.cell(40, 8, f"{row['V. Unit.']:,.2f}", 1)
-        pdf.cell(40, 8, f"{sub:,.2f}", 1)
-        pdf.ln()
-
-    pdf.ln(5)
-    pdf.set_font("Arial", "B", 12)
-    pdf.cell(0, 10, f"TOTAL DO ORÇAMENTO: R$ {total:,.2f}", ln=True, align="R")
-    pdf.set_font("Arial", "I", 10)
-    pdf.cell(0, 10, f"Forma de Pagamento: {pagto}", ln=True)
-
-    pdf.ln(20)
-    pdf.cell(0, 10, "________________________________________________", ln=True, align="C")
-    pdf.cell(0, 5, "Assinatura do Cliente", ln=True, align="C")
-    
-    return pdf.output(dest='S')
-
-# 4. SIDEBAR
+# 3. BARRA LATERAL (CONFIGURAÇÃO DA EMPRESA)
 with st.sidebar:
-    st.header("⚙️ CONFIGURAÇÃO")
-    logo_file = st.file_uploader("Logo da Empresa", type=['png', 'jpg'])
-    nome_empresa = st.text_input("Empresa", "VULCAT PNEUS")
-    cnpj = st.text_input("CNPJ")
-    tel_empresa = st.text_input("Telefone")
-    end_empresa = st.text_area("Endereço")
-    empresa_info = {'nome': nome_empresa, 'cnpj': cnpj, 'tel': tel_empresa, 'end': end_empresa}
+    st.title("⚙️ CONFIGURAÇÕES")
+    logo_file = st.file_uploader("Carregar Logotipo (PC)", type=['png', 'jpg', 'jpeg'])
+    nome_empresa = st.text_input("Nome da Empresa", "VULCAT PNEUS")
+    cnpj_input = st.text_input("CNPJ (números)")
+    tel_empresa = st.text_input("Telefone (números)")
+    endereco_empresa = st.text_area("Endereço Completo")
+    st.divider()
+    st.caption("v5.0 Profissional")
 
-# 5. ABAS
-tabs = st.tabs(["📊 Dashboard", "📄 Orçamento", "🛠️ Produção", "🛞 Catálogo", "💰 Financeiro", "👥 Clientes"])
+# 4. PAINEL GERAL (DASHBOARD COM GRÁFICO DE PIZZA)
+st.title(f"🚜 {nome_empresa}")
 
-# --- ABA CLIENTES (ALIMENTA O ORÇAMENTO) ---
-with tabs[5]:
-    st.subheader("👥 Cadastro de Clientes")
-    st.session_state.clientes = st.data_editor(st.session_state.clientes, num_rows="dynamic", use_container_width=True)
+with st.expander("📈 PAINEL GERAL E INDICADORES", expanded=True):
+    # Cálculos Financeiros
+    ent = st.session_state.db_financeiro[st.session_state.db_financeiro['Tipo'] == "Entrada"]['Valor'].sum()
+    sai = st.session_state.db_financeiro[st.session_state.db_financeiro['Tipo'] == "Saída"]['Valor'].sum()
+    saldo = ent - sai
 
-# --- ABA CATÁLOGO (ALIMENTA O ORÇAMENTO) ---
-with tabs[3]:
-    st.subheader("🛞 Catálogo de Medidas")
-    st.session_state.catalogo = st.data_editor(st.session_state.catalogo, num_rows="dynamic", use_container_width=True)
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Total Entradas", f"R$ {ent:,.2f}")
+    c2.metric("Total Saídas", f"R$ {sai:,.2f}", delta_color="inverse")
+    c3.metric("Saldo Líquido", f"R$ {saldo:,.2f}")
+    c4.metric("Clientes Ativos", len(st.session_state.db_clientes))
 
-# --- ABA ORÇAMENTO (COMUNICA COM AS OUTRAS) ---
-with tabs[1]:
-    st.subheader("📝 Novo Orçamento Profissional")
+    st.divider()
+    col_g1, col_g2 = st.columns(2)
     
-    col_c1, col_c2 = st.columns(2)
-    # Aqui ele busca os nomes cadastrados na aba Clientes
-    lista_clientes = st.session_state.clientes['Nome'].tolist()
-    cliente_sel = col_c1.selectbox("Selecionar Cliente Cadastrado", [""] + lista_clientes)
+    # Gráfico de Pizza Financeiro
+    if ent > 0 or sai > 0:
+        fig_fin = px.pie(values=[ent, sai], names=['Entradas', 'Saídas'], title="Saúde Financeira", hole=0.4, color_discrete_sequence=['#2ecc71', '#e74c3c'])
+        col_g1.plotly_chart(fig_fin, use_container_width=True)
+    else:
+        col_g1.info("Aguardando dados financeiros para gerar gráfico.")
+
+    # Gráfico de Pizza Clientes
+    if not st.session_state.db_clientes.empty:
+        fig_cli = px.pie(st.session_state.db_clientes, names='Cidade', title="Distribuição de Clientes por Cidade", hole=0.4)
+        col_g2.plotly_chart(fig_cli, use_container_width=True)
+
+# 5. ABAS DO SISTEMA
+tabs = st.tabs(["📄 Orçamento", "🛠️ Produção", "💰 Financeiro", "🛞 Catálogo", "📦 Estoque", "👥 Clientes"])
+
+# --- ABA ORÇAMENTO (INTEGRADA) ---
+with tabs[0]:
+    st.subheader("📝 Orçamento Profissional")
     
-    # Preenchimento automático dos dados do cliente
-    cliente_doc, cliente_tel, cliente_end = "", "", ""
+    # Cabeçalho do Orçamento com Logo
+    col_logo, col_header = st.columns([1, 3])
+    if logo_file: col_logo.image(logo_file, width=150)
+    col_header.write(f"**{nome_empresa}** | CNPJ: {format_cnpj(cnpj_input)}")
+    col_header.write(f"Tel: {format_tel(tel_empresa)} | {endereco_empresa}")
+
+    st.divider()
+    o1, o2 = st.columns(2)
+    
+    # Busca Clientes Cadastrados
+    lista_nomes = st.session_state.db_clientes['Nome'].tolist()
+    cliente_sel = o1.selectbox("Selecionar Cliente", [""] + lista_nomes)
+    
+    # Datas em PT-BR
+    d_ent = o2.date_input("Data de Entrada", format="DD/MM/YYYY")
+    d_sai = o2.date_input("Previsão de Saída", format="DD/MM/YYYY")
+
+    # Puxa dados do cliente automaticamente
     if cliente_sel:
-        row = st.session_state.clientes[st.session_state.clientes['Nome'] == cliente_sel].iloc[0]
-        cliente_doc, cliente_tel, cliente_end = row['CPF/CNPJ'], row['Telefone'], row['Endereço']
+        c_dados = st.session_state.db_clientes[st.session_state.db_clientes['Nome'] == cliente_sel].iloc[0]
+        st.info(f"**Cliente:** {c_dados['Nome']} | **Doc:** {c_dados['CPF/CNPJ']} | **Tel:** {c_dados['Telefone']}")
     
-    # Datas em Português
-    d_ent = col_c2.date_input("Data de Entrada", format="DD/MM/YYYY")
-    d_sai = col_c2.date_input("Previsão de Saída", format="DD/MM/YYYY")
-
-    st.write(f"**Documento:** {cliente_doc} | **Tel:** {cliente_tel}")
-    st.write(f"**Endereço:** {cliente_end}")
-
-    df_orc = pd.DataFrame([{"Item/Medida": "", "Qtd": 1, "V. Unit.": 0.0}])
-    edit_orc = st.data_editor(df_orc, num_rows="dynamic", use_container_width=True)
+    # Tabela de Itens (Orçamento)
+    df_orc = pd.DataFrame([{"Medida": "", "Serviço": "", "Qtd": 1, "V. Unit": 0.0}])
+    edit_orc = st.data_editor(df_orc, num_rows="dynamic", use_container_width=True, key="editor_orc")
     
-    total = (edit_orc['Qtd'] * edit_orc['V. Unit.']).sum()
-    pagto = st.selectbox("Pagamento", ["PIX", "Dinheiro", "Boleto", "Cartão"])
+    total_orc = (edit_orc['Qtd'] * edit_orc['V. Unit']).sum()
+    st.write(f"### TOTAL: R$ {total_orc:,.2f}")
+    
+    forma_pgto = st.selectbox("Forma de Pagamento", ["PIX", "Dinheiro", "Boleto", "Cartão"])
 
     if st.button("🚀 Gerar PDF Oficial"):
-        cliente_dados = {'nome': cliente_sel, 'doc': cliente_doc, 'tel': cliente_tel, 'end': cliente_end}
-        datas_format = {'ent': d_ent.strftime('%d/%m/%Y'), 'sai': d_sai.strftime('%d/%m/%Y')}
-        
-        pdf_out = gerar_pdf_orcamento(empresa_info, cliente_dados, edit_orc, total, pagto, datas_format)
-        st.download_button("📥 Baixar Arquivo PDF", data=pdf_out, file_name=f"Orcamento_{cliente_sel}.pdf", mime="application/pdf")
+        st.success("Visualização pronta para impressão. Use Ctrl + P.")
+        st.write("---")
+        st.write(f"### ORÇAMENTO - {nome_empresa}")
+        st.table(edit_orc)
+        st.write(f"**Forma de Pagamento:** {forma_pgto}")
+        st.write(f"**Data Entrada:** {d_ent.strftime('%d/%m/%Y')} | **Saída:** {d_sai.strftime('%d/%m/%Y')}")
+        st.write("\n\n")
+        st.write("________________________________________________")
+        st.write("Assinatura do Cliente")
 
-# --- ABA FINANCEIRO (ENTRADA/SAÍDA) ---
-with tabs[4]:
+# --- ABA PRODUÇÃO ---
+with tabs[1]:
+    st.subheader("🛠️ Ficha de Produção (Sem Valores)")
+    st.data_editor(pd.DataFrame([{"Série": "", "Serviço": "", "Etapa": "Inspeção", "Status": "Pendente"}]), num_rows="dynamic", use_container_width=True)
+
+# --- ABA FINANCEIRO (ENTRADA/SAÍDA ZERADA) ---
+with tabs[2]:
     st.subheader("💰 Fluxo de Caixa")
-    st.session_state.financeiro = st.data_editor(st.session_state.financeiro, num_rows="dynamic", use_container_width=True, column_config={
+    st.session_state.db_financeiro = st.data_editor(st.session_state.db_financeiro, num_rows="dynamic", use_container_width=True, column_config={
         "Data": st.column_config.DateColumn("Data", format="DD/MM/YYYY"),
         "Tipo": st.column_config.SelectboxColumn("Tipo", options=["Entrada", "Saída"])
     })
-    ent = st.session_state.financeiro[st.session_state.financeiro['Tipo'] == "Entrada"]['Valor'].sum()
-    sai = st.session_state.financeiro[st.session_state.financeiro['Tipo'] == "Saída"]['Valor'].sum()
-    st.metric("Saldo Líquido", f"R$ {(ent-sai):,.2f}")
 
-# --- ABA DASHBOARD (GRÁFICO DE PIZZA) ---
-with tabs[0]:
-    st.subheader("📈 Painel Geral")
-    c1, c2 = st.columns(2)
-    
-    # Gráfico Financeiro
-    fig_fin = px.pie(values=[ent, sai], names=["Entradas", "Saídas"], title="Saúde Financeira", hole=0.4, color_discrete_sequence=['#2ecc71', '#e74c3c'])
-    c1.plotly_chart(fig_fin, use_container_width=True)
-    
-    # Gráfico de Clientes por Cidade (Exemplo de comunicação)
-    c2.metric("Total de Clientes", len(st.session_state.clientes))
-    c2.metric("Itens no Catálogo", len(st.session_state.catalogo))
+# --- ABA CATÁLOGO ---
+with tabs[3]:
+    st.subheader("🛞 Catálogo de Medidas")
+    st.session_state.db_catalogo = st.data_editor(st.session_state.db_catalogo, num_rows="dynamic", use_container_width=True)
 
+# --- ABA ESTOQUE ---
+with tabs[4]:
+    st.subheader("📦 Controle de Insumos")
+    st.data_editor(pd.DataFrame([{"Item": "", "Qtd": 0, "Mínimo": 5}]), num_rows="dynamic", use_container_width=True)
+
+# --- ABA CLIENTES ---
+with tabs[5]:
+    st.subheader("👥 Cadastro de Clientes")
+    st.session_state.db_clientes = st.data_editor(st.session_state.db_clientes, num_rows="dynamic", use_container_width=True)
 
 
 
