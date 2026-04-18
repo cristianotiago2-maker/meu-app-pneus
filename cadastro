@@ -1,0 +1,18 @@
+st.markdown("### 📝 Novo Cadastro de Pneu")
+tipo_pneu = st.selectbox("Selecione o segmento", ["Agrícola", "Rodoviário"])
+
+with st.expander("Clique para preencher os dados técnicos"):
+    col_a, col_b = st.columns(2)
+    with col_a:
+        marca = st.text_input("Marca do Pneu")
+        medida = st.text_input("Medida (ex: 18.4-38 ou 295/80)")
+    with col_b:
+        if tipo_pneu == "Agrícola":
+            capacidade = st.text_input("Nº de Lonas / PR")
+        else:
+            capacidade = st.text_input("Índice de Carga/Velocidade")
+        preco = st.number_input("Preço de Custo (R$)", min_value=0.0)
+
+    if st.button("Confirmar Cadastro"):
+        st.success(f"Pneu {tipo_pneu} {marca} salvo com sucesso!")
+
