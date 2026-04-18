@@ -1,363 +1,146 @@
 import streamlit as st
 import pandas as pd
-import sqlite3
-from fpdf import FPDF
-from datetime import datetime
 import plotly.express as px
+import requests
+from datetime import datetime
+from fpdf import FPDF
 
-# --- CONFIGURAÇÃO E ESTILO ---
-st.set_page_config(page_title="ERP Pneus Pro + Alertas", layout="wide")
+# 1. CONFIGURAÇÃO DA PÁGINA
+st.set_page_config(page_title="VULCAT PNEUS - Gestão Pro", layout="wide", page_icon="🚛")
 
-# --- CONEXÃO BANCO DE DADOS ---
-conn = sqlite3.connect('dados_v3.db', check_same_thread=False)
-c = conn.cursor()
-
-c.execute('CREATE TABLE IF NOT EXISTS financeiro (id INTEGER PRIMARY KEY, data TEXT, descricao TEXT, tipo TEXT, categoria TEXT, valor REAL)')
-c.execute('CREATE TABLE IF NOT EXISTS estoque (id INTEGER PRIMARY KEY, tipo_pneu TEXT, medida TEXT, marca TEXT, qtd INTEGER)')
-c.execute('CREATE TABLE IF NOT EXISTS clientes (id INTEGER PRIMARY KEY, cnpj TEXT, nome TEXT, telefone TEXT)')
-conn.commit()
-
-def carregar(tabela):
-    return pd.read_sql(f'SELECT * FROM {tabela}', conn)
-
-# --- SIDEBAR ---
-with st.sidebar:
-    st.image("https://flaticon.com", width=100)
-    st.title("Pneus System Pro")
-    empresa = st.text_input("Sua Empresa", "Borracharia Inovação")
-    cnpj_emp = st.text_input("CNPJ", "00.000.000/0001-00")
-    st.markdown("---")
-    menu = st.radio("Menu", ["Painel Geral", "Financeiro", "Produção", "Estoque", "Clientes"])
-    qtd_minima = st.slider("Alerta de estoque mínimo", 1, 10, 3)
-
-# --- MÓDULO 1: PAINEL GERAL (DASHBOARD + ALERTAS) ---
-if menu == "Painel Geral":
-    st.title(f"📊 Dashboard - {empresa}")
-    
-    # --- ÁREA DE ALERTAS ---
-    df_est = carregar("estoque")
-    if not df_est.empty:
-        estoque_baixo = df_est[df_est['qtd'] <= qtd_minima]
-        if not estoque_baixo.empty:
-            for _, row in estoque_baixo.iterrows():
-                st.error(f"🚨 **ALERTA DE ESTOQUE:** O pneu **{row['medida']} ({row['marca']})** tem apenas **{row['qtd']}** unidades!")
-
-    # --- MÉTRICAS FINANCEIRAS ---
-    df_fin = carregar("financeiro")
-    col1, col2, col3 = st.columns(3)
-    
-    if not df_fin.empty:
-        rec = df_fin[df_fin['tipo'] == 'Entrada']['valor'].sum()
-        desp = df_fin[df_fin['tipo'] == 'Saída']['valor'].sum()
-        col1.metric("Receita Total", f"R$ {rec:,.2f}")
-        col2.metric("Despesas", f"R$ {desp:,.2f}", delta=f"-{desp:,.2f}", delta_color="inverse")
-        col3.metric("Caixa Líquido", f"R$ {rec-desp:,.2f}")
-
-        st.markdown("---")
-        g1, g2 = st.columns(2)
-        
-        with g1:
-            st.subheader("Entradas por Categoria")
-            df_e = df_fin[df_fin['tipo'] == 'Entrada']
-            fig_e = px.pie(df_e, values='valor', names='categoria', hole=.4, color_discrete_sequence=px.colors.sequential.RdBu)
-            st.plotly_chart(fig_e, use_container_width=True)
-            
-        with g2:
-            st.subheader("Saídas por Categoria")
-            df_s = df_fin[df_fin['tipo'] == 'Saída']
-            fig_s = px.pie(df_s, values='valor', names='categoria', hole=.4, color_discrete_sequence=px.colors.sequential.YlOrRd)
-            st.plotly_chart(fig_s, use_container_width=True)
-
-# --- MÓDULO 2: FINANCEIRO COMPLETO ---
-elif menu == "Financeiro":
-    st.title("💸 Fluxo de Caixa Detalhado")
-    with st.expander("Registrar Movimentação"):
-        c1, c2, c3, c4 = st.columns(4)
-        d = c1.text_input("Descrição")
-        v = c2.number_input("Valor R$", 0.0)
-        t = c3.selectbox("Tipo", ["Entrada", "Saída"])
-        cat = c4.selectbox("Categoria", ["Serviço", "Venda", "Compra Estoque", "Luz/Água", "Salários"])
-        if st.button("Lançar"):
-            data_hoje = datetime.now().strftime("%d/%m/%Y")
-            c.execute('INSERT INTO financeiro (data, descricao, tipo, categoria, valor) VALUES (?,?,?,?,?)', (data_hoje, d, t, cat, v))
-            conn.commit()
-            st.success("Lançado com sucesso!")
-            st.rerun()
-    
-    st.data_editor(carregar("financeiro"), use_container_width=True)
-
-# --- MÓDULO 3: PRODUÇÃO ---
-elif menu == "Produção":
-    st.title("🏗️ Ordem de Serviço")
-    with st.form("os"):
-        cli = st.text_input("Cliente")
-        med = st.text_input("Medidas dos Pneus")
-        serv = st.selectbox("Serviço", ["Recapagem", "Rodoviário", "Agrícola", "Reparo"])
-        obs = st.text_area("Observações Técnicas")
-        if st.form_submit_button("Gerar Ficha"):
-            pdf = FPDF()
-            pdf.add_page()
-            pdf.set_font("Arial", 'B', 16)
-            pdf.cell(200, 10, empresa, ln=1, align='C')
-            pdf.set_font("Arial", '', 12)
-            pdf.cell(200, 10, f"FICHA TÉCNICA - {serv}", ln=1, align='C')
-            pdf.ln(10)
-            pdf.cell(0, 10, f"Cliente: {cli} | Medidas: {med}", ln=1)
-            pdf.multi_cell(0, 10, f"Instruções: {obs}")
-            pdf_bytes = pdf.output(dest='S').encode('latin-1')
-            st.download_button("Clique para Baixar PDF", pdf_bytes, "ficha_producao.pdf")
-
-# --- MÓDULO 4: ESTOQUE EDITÁVEL ---
-elif menu == "Estoque":
-    st.title("🛞 Inventário de Pneus")
-    st.caption("Dica: Use a última linha vazia para adicionar novos itens.")
-    df_est = carregar("estoque")
-    df_edit = st.data_editor(df_est, use_container_width=True, num_rows="dynamic")
-    
-    if st.button("Sincronizar Estoque"):
-        df_edit.to_sql('estoque', conn, if_exists='replace', index=False)
-        st.success("Estoque atualizado!")
-        st.rerun()
-
-# --- MÓDULO 5: CLIENTES ---
-elif menu == "Clientes":
-    st.title("👥 Carteira de Clientes")
-    df_cli = carregar("clientes")
-    df_cli_ed = st.data_editor(df_cli, use_container_width=True, num_rows="dynamic")
-    if st.button("Salvar Clientes"):
-        df_cli_ed.to_sql('clientes', conn, if_exists='replace', index=False)
-        st.success("Salvo!")
-
-
----------- Forwarded message ---------
-De: Tiago Cristiano da Silva <cristianotiago2@gmail.com>
-Date: sáb., 18 de abr. de 2026, 00:04
-Subject: Fwd:
-To: Tiago Cristiano da Silva <cristianotiago2@gmail.com>
-
-
-import streamlit as st
-import pandas as pd
-from reportlab.pdfgen import canvas
-import io
-
-st.set_page_config(page_title="Vulcanização PRO", layout="wide")
-
-# ----------- ESTILO -----------
+# Estilo CSS para deixar o app bonito e profissional
 st.markdown("""
-<style>
-.main {background-color: #f5f7fa;}
-h1 {color: #0e1117;}
-.stButton>button {
-    background-color: #0e1117;
-    color: white;
-    border-radius: 8px;
-}
-</style>
-""", unsafe_allow_html=True)
+    <style>
+    .main { background-color: #f5f7f9; }
+    .stMetric { background-color: #ffffff; padding: 20px; border-radius: 12px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); border-left: 5px solid #007bff; }
+    div[data-testid="stSidebarNav"] { background-color: #1e293b; }
+    .stButton>button { width: 100%; border-radius: 8px; background-color: #007bff; color: white; }
+    </style>
+    """, unsafe_allow_html=True)
 
-# ----------- LOGIN -----------
-def login():
-    st.markdown("## 🔐 Sistema Vulcanização")
-    col1, col2, col3 = st.columns([1,2,1])
+# --- FUNÇÕES DE APOIO ---
+def consultar_cnpj(cnpj):
+    cnpj = "".join(filter(str.isdigit, cnpj))
+    try:
+        response = requests.get(f"https://receitaws.com.br{cnpj}", timeout=5)
+        if response.status_code == 200:
+            d = response.json()
+            return d.get('nome'), f"{d.get('logradouro')}, {d.get('numero')}", d.get('telefone')
+    except: return None
 
-    with col2:
-        user = st.text_input("Usuário")
-        senha = st.text_input("Senha", type="password")
+def gerar_pdf(titulo, df):
+    pdf = FPDF()
+    pdf.add_page()
+    pdf.set_font("Arial", 'B', 16)
+    pdf.cell(190, 10, f"VULCAT PNEUS - {titulo}", ln=True, align='C')
+    pdf.set_font("Arial", size=10)
+    pdf.ln(10)
+    for col in df.columns: pdf.cell(31, 8, str(col), border=1)
+    pdf.ln()
+    for i in range(len(df)):
+        for col in df.columns: pdf.cell(31, 8, str(df.iloc[i][col])[:15], border=1)
+        pdf.ln()
+    return pdf.output(dest='S').encode('latin-1', 'replace')
 
-        if st.button("Entrar"):
-            if user == "admin" and senha == "123":
-                st.session_state.logado = True
-            else:
-                st.error("Login inválido")
+# --- BANCO DE DADOS (SESSION STATE) ---
+if 'db' not in st.session_state:
+    st.session_state.db = {
+        'clientes': pd.DataFrame(columns=['Nome', 'CNPJ', 'Telefone', 'Endereco']),
+        'medidas': pd.DataFrame({"Medida": ["295/80 R22.5", "18.4-34", "11.00 R22", "14.9-24", "23.1-26"], "Tipo": ["Rodoviário", "Agrícola", "Rodoviário", "Agrícola", "Agrícola"]}),
+        'producao': pd.DataFrame(columns=['ID', 'Cliente', 'Serviço', 'Entrada', 'Saída', 'Fogo', 'DOT', 'Status']),
+        'financeiro': pd.DataFrame(columns=['Data', 'Descrição', 'Tipo', 'Valor']),
+        'estoque': pd.DataFrame({"Item": ["Manchão G", "Cola 1L", "Borracha"], "Qtd": [10, 5, 20]})
+    }
 
-# ----------- PDF -----------
-def gerar_pdf(cliente, servico, valor):
-    buffer = io.BytesIO()
-    c = canvas.Canvas(buffer)
+# --- MENU LATERAL ---
+with st.sidebar:
+    st.image("https://flaticon.com", width=80)
+    st.title("VULCAT PNEUS")
+    menu = st.radio("NAVEGAÇÃO", ["📊 Painel Geral", "👥 Clientes", "📏 Medidas", "📝 Orçamentos", "🏭 Produção", "📦 Estoque", "💰 Financeiro", "⚙️ Empresa"])
 
-    c.setFont("Helvetica-Bold", 14)
-    c.drawString(100, 800, "ORÇAMENTO - VULCANIZAÇÃO")
+# --- 📊 PAINEL GERAL ---
+if menu == "📊 Painel Geral":
+    st.title("📊 Painel Geral de Controle")
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Produção Ativa", len(st.session_state.db['producao']))
+    rec = st.session_state.db['financeiro'][st.session_state.db['financeiro']['Tipo'] == 'Entrada']['Valor'].sum()
+    c2.metric("Receita Total", f"R$ {rec:,.2f}")
+    c3.metric("Clientes", len(st.session_state.db['clientes']))
+    c4.metric("Itens Estoque", len(st.session_state.db['estoque']))
 
-    c.setFont("Helvetica", 12)
-    c.drawString(100, 760, f"Cliente: {cliente}")
-    c.drawString(100, 730, f"Serviço: {servico}")
-    c.drawString(100, 700, f"Valor: R$ {valor}")
+    st.divider()
+    col_g1, col_g2 = st.columns(2)
+    with col_g1:
+        st.subheader("Etapas da Produção")
+        if not st.session_state.db['producao'].empty:
+            fig = px.pie(st.session_state.db['producao'], names='Status', hole=0.4, color_discrete_sequence=px.colors.qualitative.Set3)
+            st.plotly_chart(fig, use_container_width=True)
+    with col_g2:
+        st.subheader("Financeiro (Entradas vs Saídas)")
+        if not st.session_state.db['financeiro'].empty:
+            fig_f = px.pie(st.session_state.db['financeiro'], names='Tipo', hole=0.4, color_discrete_map={'Entrada':'#2ecc71', 'Saída':'#e74c3c'})
+            st.plotly_chart(fig_f, use_container_width=True)
 
-    c.save()
-    buffer.seek(0)
-    return buffer
+# --- 👥 CLIENTES (CNPJ AUTO) ---
+elif menu == "👥 Clientes":
+    st.header("👥 Cadastro de Clientes")
+    with st.expander("🔍 Preenchimento Automático por CNPJ"):
+        cnpj_input = st.text_input("Digite o CNPJ")
+        if st.button("Consultar Receita"):
+            res = consultar_cnpj(cnpj_input)
+            if res: st.success(f"Encontrado: {res[0]}"); st.session_state['tmp_cli'] = res
+            else: st.error("Não encontrado")
+    
+    st.session_state.db['clientes'] = st.data_editor(st.session_state.db['clientes'], num_rows="dynamic", use_container_width=True)
 
-# ----------- APP -----------
-def app():
-    st.title("🛞 Vulcanização PRO")
+# --- 📝 ORÇAMENTOS ---
+elif menu == "📝 Orçamentos":
+    st.header("📝 Novo Orçamento")
+    with st.form("orc"):
+        cli = st.selectbox("Cliente", st.session_state.db['clientes']['Nome'].tolist()) if not st.session_state.db['clientes'].empty else st.warning("Cadastre um cliente.")
+        med = st.selectbox("Medida", st.session_state.db['medidas']['Medida'].tolist())
+        serv = st.text_input("Serviço")
+        val = st.number_input("Valor R$", min_value=0.0)
+        if st.form_submit_button("🚀 Aprovar Orçamento"):
+            id_os = len(st.session_state.db['producao']) + 1
+            # Produção e Financeiro Integrado
+            st.session_state.db['producao'] = pd.concat([st.session_state.db['producao'], pd.DataFrame([[id_os, cli, f"{med}-{serv}", datetime.now().strftime("%H:%M"), "--:--", "", "", "Fila"]], columns=st.session_state.db['producao'].columns)], ignore_index=True)
+            st.session_state.db['financeiro'] = pd.concat([st.session_state.db['financeiro'], pd.DataFrame([[datetime.now().strftime("%d/%m"), f"OS {id_os}", "Entrada", val]], columns=st.session_state.db['financeiro'].columns)], ignore_index=True)
+            st.success("Aprovado!")
 
-    menu = st.sidebar.radio("Menu", ["Dashboard", "Novo Serviço"])
+# --- 🏭 PRODUÇÃO (FOGO E DOT) ---
+elif menu == "🏭 Produção":
+    st.header("🏭 Ficha de Produção Oficina")
+    st.session_state.db['producao'] = st.data_editor(st.session_state.db['producao'], num_rows="dynamic", use_container_width=True)
+    if st.button("📥 Baixar Ficha de Produção (PDF)"):
+        pdf = gerar_pdf("OFICINA", st.session_state.db['producao'])
+        st.download_button("Clique aqui para baixar", pdf, "oficina.pdf")
 
-    if "dados" not in st.session_state:
-        st.session_state.dados = []
+# --- 💰 FINANCEIRO ---
+elif menu == "💰 Financeiro":
+    st.header("💰 Controle Financeiro")
+    st.session_state.db['financeiro'] = st.data_editor(st.session_state.db['financeiro'], num_rows="dynamic", use_container_width=True)
+    e = st.session_state.db['financeiro'][st.session_state.db['financeiro']['Tipo'] == 'Entrada']['Valor'].sum()
+    s = st.session_state.db['financeiro'][st.session_state.db['financeiro']['Tipo'] == 'Saída']['Valor'].sum()
+    st.divider()
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Total Entradas", f"R$ {e:,.2f}")
+    c2.metric("Total Saídas", f"R$ {s:,.2f}")
+    c3.metric("SALDO FINAL", f"R$ {e-s:,.2f}")
 
-    # -------- DASHBOARD --------
-    if menu == "Dashboard":
-        st.subheader("📊 Visão Geral")
+# --- ⚙️ EMPRESA ---
+elif menu == "⚙️ Empresa":
+    st.header("⚙️ Configurações da Empresa")
+    st.text_input("Endereço", "Rua...")
+    st.text_input("CNPJ", "00.000.000/0001-00")
+    st.text_input("Telefone", "(00) 00000-0000")
+    st.file_uploader("Trocar Logotipo")
 
-        if st.session_state.dados:
-            df = pd.DataFrame(st.session_state.dados)
+# Outras abas (Medidas e Estoque)
+elif menu == "📏 Medidas":
+    st.session_state.db['medidas'] = st.data_editor(st.session_state.db['medidas'], num_rows="dynamic", use_container_width=True)
+elif menu == "📦 Estoque":
+    st.session_state.db['estoque'] = st.data_editor(st.session_state.db['estoque'], num_rows="dynamic", use_container_width=True)
 
-            col1, col2, col3 = st.columns(3)
-
-            with col1:
-                st.metric("Serviços", len(df))
-
-            with col2:
-                st.metric("Faturamento", f"R$ {df['Valor'].sum():.2f}")
-
-            with col3:
-                st.metric("Ticket Médio", f"R$ {df['Valor'].mean():.2f}")
-
-            st.divider()
-
-            filtro = st.text_input("🔍 Buscar cliente")
-
-            if filtro:
-                df = df[df["Cliente"].str.contains(filtro, case=False)]
-
-            st.dataframe(df, use_container_width=True)
-
-        else:
-            st.info("Nenhum serviço cadastrado")
-
-    # -------- NOVO SERVIÇO --------
-    if menu == "Novo Serviço":
-        st.subheader("➕ Novo Atendimento")
-
-        col1, col2 = st.columns(2)
-
-        with col1:
-            cliente = st.text_input("Cliente")
-            servico = st.text_input("Serviço")
-
-        with col2:
-            valor = st.number_input("Valor (R$)", min_value=0.0, step=10.0)
-
-        if st.button("💾 Salvar"):
-            st.session_state.dados.append({
-                "Cliente": cliente,
-                "Serviço": servico,
-                "Valor": valor
-            })
-            st.success("Serviço cadastrado!")
-
-        if st.button("📄 Gerar Orçamento"):
-            pdf = gerar_pdf(cliente, servico, valor)
-
-            st.download_button(
-                "Baixar PDF",
-                pdf,
-                file_name="orcamento.pdf",
-                mime="application/pdf"
-            )
-
-# -------- EXECUÇÃO --------
-if "logado" not in st.session_state:
-    st.session_state.logado = False
-
-if st.session_state.logado:
-    app()
-else:
-    login()
-
----------- Forwarded message ---------
-De: Tiago Cristiano da Silva <cristianotiago2@gmail.com>
-Date: sáb., 18 de abr. de 2026, 00:01
-Subject:
-To: Tiago Cristiano da Silva <cristianotiago2@gmail.com>
-
-
-import streamlit as st
-import pandas as pd
-from reportlab.pdfgen import canvas
-import io
-
-# ---------------- LOGIN ----------------
-def login():
-    st.title("🔐 Login")
-    user = st.text_input("Usuário")
-    senha = st.text_input("Senha", type="password")
-
-    if st.button("Entrar"):
-        if user == "admin" and senha == "123":
-            st.session_state.logado = True
-        else:
-            st.error("Login inválido")
-
-# ---------------- PDF ----------------
-def gerar_pdf(cliente, servico, valor):
-    buffer = io.BytesIO()
-    c = canvas.Canvas(buffer)
-
-    c.drawString(100, 800, "VULCANIZAÇÃO")
-    c.drawString(100, 760, f"Cliente: {cliente}")
-    c.drawString(100, 740, f"Serviço: {servico}")
-    c.drawString(100, 720, f"Valor: R$ {valor}")
-
-    c.save()
-    buffer.seek(0)
-    return buffer
-
-# ---------------- APP ----------------
-def app():
-    st.title("🛞 Sistema de Vulcanização")
-
-    menu = st.sidebar.selectbox("Menu", ["Dashboard", "Novo Serviço"])
-
-    if "dados" not in st.session_state:
-        st.session_state.dados = []
-
-    if menu == "Dashboard":
-        st.subheader("📊 Serviços Realizados")
-
-        if st.session_state.dados:
-            df = pd.DataFrame(st.session_state.dados)
-            st.dataframe(df)
-
-            total = df["Valor"].sum()
-            st.success(f"💰 Total: R$ {total}")
-
-        else:
-            st.info("Nenhum serviço cadastrado")
-
-    if menu == "Novo Serviço":
-        st.subheader("➕ Cadastrar Serviço")
-
-        cliente = st.text_input("Cliente")
-        servico = st.text_input("Serviço")
-        valor = st.number_input("Valor", min_value=0.0)
-
-        if st.button("Salvar"):
-            st.session_state.dados.append({
-                "Cliente": cliente,
-                "Serviço": servico,
-                "Valor": valor
-            })
-            st.success("Salvo com sucesso!")
-
-        if st.button("Gerar PDF"):
-            pdf = gerar_pdf(cliente, servico, valor)
-            st.download_button(
-                label="📄 Baixar PDF",
-                data=pdf,
-                file_name="orcamento.pdf",
-                mime="application/pdf"
-            )
-
-# ---------------- EXECUÇÃO ----------------
-if "logado" not in st.session_state:
-    st.session_state.logado = False
-
-if st.session_state.logado:
-    app()
-else:
-    login()
 
 
